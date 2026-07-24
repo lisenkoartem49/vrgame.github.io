@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>VR Block Builder - v4.0</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: sans-serif; }
+        #debug { position: absolute; top: 10px; left: 10px; color: #ffeb3b; background: rgba(0,0,0,0.5); padding: 10px; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <div id="debug">Инициализация...</div>
+    <script>
+        let scene, camera, renderer, world, playerRig;
+        let blocks = [], controllers = [], handMeshes = [];
+        let isMenuOpen = false, menuCooldown = 0, menuGroup = null;
+        let selectedColor = 0x4CAF50, selectedSize = 0.5;
+        let grabbedData = [null, null];
+
+        function init() {
+            // 1. Сначала создаем мир Cannon.js
+            world = new CANNON.World();
+            world.gravity.set(0, -9.81, 0);
+
+            // 2. Сцена Three.js
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x303035);
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
+            
+            playerRig = new THREE.Group();
+            playerRig.position.set(0, 0, 2);
+            scene.add(playerRig);
+            playerRig.add(camera);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // 3. Добавляем физический пол
+            const groundBody = new CANNON.Body({ mass: 0 });
+            groundBody.addShape(new CANNON.Plane());
+            groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+            world.addBody(groundBody);
+
+            // 4. Кнопка VR (встроенная реализация)
+            const btn = document.createElement('button');
+            btn.textContent = '▶ ВОЙТИ В VR';
+            btn.style.cssText = 'position:absolute; bottom:20px; left:50%; transform:translateX(-50%); padding:20px; z-index:999;';
+            document.body.appendChild(btn);
+            
+            navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] }).then(s => {
+                renderer.xr.setSession(s);
+                btn.remove();
+            }).catch(e => document.getElementById('debug').textContent = 'VR Error: ' + e.message);
+
+            setupControllers();
+            createWall(0, 0.5, -5, 10, 1, 0.5); // Теперь это сработает, так как world уже есть
+            
+            renderer.setAnimationLoop(animate);
+        }
+
+        function setupControllers() {
+            for(let i=0; i<2; i++) {
+                const c = renderer.xr.getController(i);
+                playerRig.add(c);
+                controllers.push(c);
+
+                const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                c.add(mesh);
+                handMeshes.push(mesh);
+
+                c.addEventListener('selectstart', () => onTriggerDown(i));
+                c.addEventListener('selectend', () => onTriggerUp(i));
+            }
+        }
+
+        function toggleMenu() {
+            if(Date.now() - menuCooldown < 500) return;
+            menuCooldown = Date.now();
+            isMenuOpen = !isMenuOpen;
+            if(!isMenuOpen && menuGroup) { scene.remove(menuGroup); menuGroup = null; }
+            else if(isMenuOpen) {
+                menuGroup = new THREE.Group();
+                const btn = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.2, 0.05), new THREE.MeshBasicMaterial({color: 0x4CAF50}));
+                btn.userData.onClick = () => spawnBlock();
+                menuGroup.add(btn);
+                
+                const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+                menuGroup.position.copy(camera.position).add(forward.multiplyScalar(0.8));
+                scene.add(menuGroup);
+            }
+        }
+
+        function spawnBlock() {
+            const pos = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion).add(camera.position);
+            const geo = new THREE.BoxGeometry(selectedSize, selectedSize, selectedSize);
+            const mat = new THREE.MeshStandardMaterial({color: selectedColor});
+            const mesh = new THREE.Mesh(geo, mat);
+            scene.add(mesh);
+
+            const body = new CANNON.Body({mass: 1});
+            body.addShape(new CANNON.Box(new CANNON.Vec3(selectedSize/2, selectedSize/2, selectedSize/2)));
+            body.position.copy(pos);
+            world.addBody(body);
+            blocks.push({mesh, body});
+        }
+
+        function createWall(x,y,z,w,h,d) {
+            const body = new CANNON.Body({mass:0});
+            body.addShape(new CANNON.Box(new CANNON.Vec3(w/2, h/2, d/2)));
+            body.position.set(x,y,z);
+            world.addBody(body);
+        }
+
+        function animate() {
+            world.step(1/60);
+            blocks.forEach(b => {
+                b.mesh.position.copy(b.body.position);
+                b.mesh.quaternion.copy(b.body.quaternion);
+            });
+            renderer.render(scene, camera);
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
