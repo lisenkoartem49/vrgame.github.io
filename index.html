@@ -2,24 +2,21 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>VR Block Builder - v2.1</title>
+    <title>VR Block Builder - v3.0</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: #000; z-index: 1000; }
-        button { padding: 25px 50px; font-size: 24px; cursor: pointer; border-radius: 15px; border: none; background: #2ecc71; color: white; font-weight: bold; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 999; background: #000; }
+        button { padding: 30px 60px; font-size: 30px; cursor: pointer; border-radius: 20px; border: none; background: #2ecc71; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="overlay">
-        <button id="vr-btn">ENTER VR</button>
-    </div>
+    <div id="overlay"><button id="vr-btn">ENTER VR</button></div>
     <script>
         let scene, camera, renderer, world, playerRig;
-        let controllers = [], blocks = [], hands = [];
-        let menuMesh = null, isMenuOpen = false;
+        let controllers = [], blocks = [], menuMesh = null, isMenuOpen = false;
         let selectedColor = 0xff0000, selectedSize = 0.5;
 
         function init() {
@@ -31,6 +28,7 @@
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
             playerRig.add(camera);
+            playerRig.position.y = 1.6; // Высота глаз
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -66,49 +64,68 @@
                 const c = renderer.xr.getController(i);
                 playerRig.add(c);
                 controllers.push(c);
-
-                // Hand sphere
-                const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                
+                // Руки-шары
+                const hand = new THREE.Mesh(new THREE.SphereGeometry(0.06), new THREE.MeshBasicMaterial({color: 0xffffff}));
                 c.add(hand);
-                hands.push(hand);
-
-                c.addEventListener('selectstart', () => grab(c));
-                c.addEventListener('selectend', () => release(c));
             }
         }
 
-        function grab(c) { /* Logic to pick up block */ }
-        function release(c) { /* Logic to drop block */ }
-
         function toggleMenu() {
             if(isMenuOpen) { scene.remove(menuMesh); isMenuOpen = false; }
-            else { /* Create menu mesh in front of player */ isMenuOpen = true; }
+            else { 
+                menuMesh = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.3, 0.05), new THREE.MeshBasicMaterial({color: 0x333333}));
+                menuMesh.position.set(0, 1.5, -0.8);
+                playerRig.add(menuMesh);
+                isMenuOpen = true; 
+            }
         }
 
         function spawnBlock() {
-            const size = selectedSize;
-            const pos = new THREE.Vector3(0, 1.2, -1).applyMatrix4(camera.matrixWorld);
-            // Spawn code...
+            const block = new THREE.Mesh(new THREE.BoxGeometry(0.3,0.3,0.3), new THREE.MeshBasicMaterial({color: selectedColor}));
+            block.position.set(0, 1.5, -1);
+            scene.add(block);
+            
+            const body = new CANNON.Body({mass: 1});
+            body.addShape(new CANNON.Box(new CANNON.Vec3(0.15, 0.15, 0.15)));
+            body.position.set(0, 1.5, -1);
+            world.addBody(body);
+            blocks.push({mesh: block, body: body});
         }
 
         function animate() {
             world.step(1/60);
             
-            // Handle movement via playerRig
             const session = renderer.xr.getSession();
             if (session) {
                 session.inputSources.forEach(source => {
                     if (source.gamepad) {
                         const axes = source.gamepad.axes;
+                        const buttons = source.gamepad.buttons;
+
+                        // Меню кнопка A (обычно индекс 4)
+                        if (source.handedness === 'right' && buttons[4]?.pressed && !isMenuOpen) {
+                            toggleMenu();
+                            setTimeout(() => {}, 500); // Кулдаун
+                        }
+
+                        // Передвижение (левый)
                         if (source.handedness === 'left') {
                             playerRig.position.z += axes[3] * 0.05;
                             playerRig.position.x += axes[2] * 0.05;
-                        } else if (source.handedness === 'right') {
-                            playerRig.rotation.y -= axes[2] * 0.05;
+                        } 
+                        // Поворот (правый)
+                        else if (source.handedness === 'right') {
+                            playerRig.rotation.y -= axes[2] * 0.03;
                         }
                     }
                 });
             }
+
+            blocks.forEach(b => {
+                b.mesh.position.copy(b.body.position);
+                b.mesh.quaternion.copy(b.body.quaternion);
+            });
 
             renderer.render(scene, camera);
         }
