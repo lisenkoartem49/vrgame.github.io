@@ -2,32 +2,34 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>VR Block Builder - v5.0</title>
+    <title>VR Block Builder - v2.1</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
     <style>
         body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: rgba(0,0,0,0.8); z-index: 1000; }
-        button { padding: 20px 40px; font-size: 24px; cursor: pointer; border-radius: 10px; border: none; background: #2ecc71; color: white; }
+        #overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; background: #000; z-index: 1000; }
+        button { padding: 25px 50px; font-size: 24px; cursor: pointer; border-radius: 15px; border: none; background: #2ecc71; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
     <div id="overlay">
-        <button id="vr-btn">НАЖМИ, ЧТОБЫ ВОЙТИ В VR</button>
+        <button id="vr-btn">ENTER VR</button>
     </div>
     <script>
         let scene, camera, renderer, world, playerRig;
-        let blocks = [], controllers = [];
+        let controllers = [], blocks = [], hands = [];
+        let menuMesh = null, isMenuOpen = false;
+        let selectedColor = 0xff0000, selectedSize = 0.5;
 
         function init() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x202025);
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
             
             playerRig = new THREE.Group();
-            playerRig.position.set(0, 0, 0);
             scene.add(playerRig);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 100);
             playerRig.add(camera);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -38,14 +40,18 @@
             world = new CANNON.World();
             world.gravity.set(0, -9.81, 0);
 
-            // Floor
+            // Ground
             const groundBody = new CANNON.Body({ mass: 0 });
             groundBody.addShape(new CANNON.Plane());
             groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
             world.addBody(groundBody);
+            
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(20,20), new THREE.MeshBasicMaterial({color: 0x444444}));
+            floor.rotation.x = -Math.PI/2;
+            scene.add(floor);
 
             setupControllers();
-            
+
             document.getElementById('vr-btn').addEventListener('click', async () => {
                 const session = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
                 await renderer.xr.setSession(session);
@@ -61,13 +67,49 @@
                 playerRig.add(c);
                 controllers.push(c);
 
-                const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({color: 0xffffff}));
-                c.add(mesh);
+                // Hand sphere
+                const hand = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({color: 0xffffff}));
+                c.add(hand);
+                hands.push(hand);
+
+                c.addEventListener('selectstart', () => grab(c));
+                c.addEventListener('selectend', () => release(c));
             }
+        }
+
+        function grab(c) { /* Logic to pick up block */ }
+        function release(c) { /* Logic to drop block */ }
+
+        function toggleMenu() {
+            if(isMenuOpen) { scene.remove(menuMesh); isMenuOpen = false; }
+            else { /* Create menu mesh in front of player */ isMenuOpen = true; }
+        }
+
+        function spawnBlock() {
+            const size = selectedSize;
+            const pos = new THREE.Vector3(0, 1.2, -1).applyMatrix4(camera.matrixWorld);
+            // Spawn code...
         }
 
         function animate() {
             world.step(1/60);
+            
+            // Handle movement via playerRig
+            const session = renderer.xr.getSession();
+            if (session) {
+                session.inputSources.forEach(source => {
+                    if (source.gamepad) {
+                        const axes = source.gamepad.axes;
+                        if (source.handedness === 'left') {
+                            playerRig.position.z += axes[3] * 0.05;
+                            playerRig.position.x += axes[2] * 0.05;
+                        } else if (source.handedness === 'right') {
+                            playerRig.rotation.y -= axes[2] * 0.05;
+                        }
+                    }
+                });
+            }
+
             renderer.render(scene, camera);
         }
 
