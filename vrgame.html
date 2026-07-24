@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <title>VR Block Builder - Meta Quest 3</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; font-family: Arial, sans-serif; }
+        #ui { position: absolute; top: 10px; left: 10px; color: white; z-index: 10; }
+        #instructions { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #aaa; text-align: center; }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+</head>
+<body>
+    <div id="ui">Нажмите squeeze (сжатие) на правом контроллере для меню</div>
+    <div id="instructions">Правый джойстик — ходить<br>Триггер — хватать и двигать блоки</div>
+
+    <script>
+        // === Основные переменные ===
+        let scene, camera, renderer;
+        let world;
+        let blocks = [];
+        let controllers = [];
+        let menuMesh = null;
+        let isMenuOpen = false;
+        let selectedColor = 0xff0000;
+        let selectedSize = 1;
+        const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
+
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x222222);
+            scene.fog = new THREE.Fog(0x222222, 10, 50);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+            renderer.shadowMap.enabled = true;
+            document.body.appendChild(renderer.domElement);
+
+            // VR Button
+            const vrButton = VRButton.createButton(renderer);
+            document.body.appendChild(vrButton);
+
+            // Свет
+            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambient);
+            const directional = new THREE.DirectionalLight(0xffffff, 0.8);
+            directional.position.set(10, 20, 10);
+            directional.castShadow = true;
+            scene.add(directional);
+
+            // Пол
+            const floorGeo = new THREE.PlaneGeometry(50, 50);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // Physics
+            world = new CANNON.World();
+            world.gravity.set(0, -9.82, 0);
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
+
+            const groundShape = new CANNON.Plane();
+            const groundBody = new CANNON.Body({ mass: 0 });
+            groundBody.addShape(groundShape);
+            groundBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
+            world.addBody(groundBody);
+
+            setupControllers();
+
+            window.addEventListener('resize', onWindowResize);
+            renderer.setAnimationLoop(animate);
+        }
+
+        function setupControllers() {
+            const controller1 = renderer.xr.getController(0);
+            const controller2 = renderer.xr.getController(1);
+            scene.add(controller1);
+            scene.add(controller2);
+
+            controllers = [controller1, controller2];
+
+            // Хватание триггером
+            controller1.addEventListener('selectstart', () => handleGrab(controller1, true));
+            controller1.addEventListener('selectend', () => handleGrab(controller1, false));
+            controller2.addEventListener('selectstart', () => handleGrab(controller2, true));
+            controller2.addEventListener('selectend', () => handleGrab(controller2, false));
+
+            // Меню на squeeze
+            controller2.addEventListener('squeezestart', toggleMenu);
+        }
+
+        let grabbedObject = null;
+        let grabOffset = new THREE.Vector3();
+
+        function handleGrab(controller, isGrabbing) {
+            if (isGrabbing) {
+                const raycaster = new THREE.Raycaster();
+                const tempMatrix = new THREE.Matrix4().identity().extractRotation(controller.matrixWorld);
+                raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
+                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
+
+                const intersects = raycaster.intersectObjects(blocks.map(b => b.mesh));
+                
+                if (intersects.length > 0) {
+                    const hitMesh = intersects[0].object;
+                    const block = blocks.find(b => b.mesh === hitMesh);
+                    if (block) {
+                        grabbedObject = block;
+                        grabOffset.copy(intersects[0].point).sub(hitMesh.position);
+                        block.body.type = CANNON.Body.KINEMATIC;
+                    }
+                }
+            } else if (grabbedObject) {
+                grabbedObject.body.type = CANNON.Body.DYNAMIC;
+                grabbedObject = null;
+            }
+        }
+
+        function toggleMenu() {
+            isMenuOpen = !isMenuOpen;
+            if (isMenuOpen) {
+                createMenu();
+            } else if (menuMesh) {
+                scene.remove(menuMesh);
+                menuMesh = null;
+            }
+        }
+
+        function createMenu() {
+            if (menuMesh) scene.remove(menuMesh);
+            
+            const menuGroup = new THREE.Group();
+            
+            const panel = new THREE.Mesh(
+                new THREE.PlaneGeometry(2.8, 2.2),
+                new THREE.MeshBasicMaterial({ color: 0x222233, side: THREE.DoubleSide })
+            );
+            panel.position.set(0, 0.1, -2);
+            menuGroup.add(panel);
+
+            // Spawn
+            const spawnBtn = createInteractiveButton("Заспавнить", 1.2, 0.35, () => spawnBlock());
+            spawnBtn.position.set(0, 0.8, -1.9);
+            menuGroup.add(spawnBtn);
+
+            // Colors
+            colors.forEach((col, i) => {
+                const btn = createColorButton(col, () => selectedColor = col);
+                btn.position.set(-1 + i * 0.4, 0.1, -1.9);
+                menuGroup.add(btn);
+            });
+
+            // Sizes
+            const sizes = [0.5, 1, 1.8];
+            sizes.forEach((sz, i) => {
+                const btn = createInteractiveButton(sz + "м", 0.5, 0.3, () => selectedSize = sz);
+                btn.position.set(-0.9 + i * 0.9, -0.6, -1.9);
+                menuGroup.add(btn);
+            });
+
+            const rightController = controllers[1];
+            if (rightController) {
+                menuGroup.position.copy(rightController.position);
+                menuGroup.quaternion.copy(rightController.quaternion);
+                menuGroup.translateZ(-1.9);
+                menuGroup.translateY(0.5);
+            }
+            
+            scene.add(menuGroup);
+            menuMesh = menuGroup;
+        }
+
+        function createInteractiveButton(text, w, h, onClick) {
+            const group = new THREE.Group();
+            const mesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(w, h),
+                new THREE.MeshBasicMaterial({ color: 0x4488ff })
+            );
+            group.add(mesh);
+            mesh.userData.onClick = onClick;
+            return group;
+        }
+
+        function createColorButton(color, onClick) {
+            const group = new THREE.Group();
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(0.28, 0.28, 0.1),
+                new THREE.MeshBasicMaterial({ color })
+            );
+            group.add(mesh);
+            mesh.userData.onClick = onClick;
+            return group;
+        }
+
+        function spawnBlock() {
+            const size = selectedSize;
+            const mesh = new THREE.Mesh(
+                new THREE.BoxGeometry(size, size, size),
+                new THREE.MeshStandardMaterial({ color: selectedColor })
+            );
+            mesh.castShadow = mesh.receiveShadow = true;
+
+            const spawnPos = new THREE.Vector3(0, 1.5, -2)
+                .applyQuaternion(camera.quaternion)
+                .add(camera.position);
+            
+            mesh.position.copy(spawnPos);
+            scene.add(mesh);
+
+            const shape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
+            const body = new CANNON.Body({ mass: 1 });
+            body.addShape(shape);
+            body.position.copy(spawnPos);
+            world.addBody(body);
+
+            blocks.push({ mesh, body });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            if (!renderer.xr.isPresenting) return;
+
+            const delta = 0.016;
+            world.step(delta);
+
+            blocks.forEach(block => {
+                block.mesh.position.copy(block.body.position);
+                block.mesh.quaternion.copy(block.body.quaternion);
+            });
+
+            if (grabbedObject && controllers.length > 0) {
+                const ctrl = controllers[0] || controllers[1];
+                if (ctrl) {
+                    const pos = new THREE.Vector3();
+                    ctrl.getWorldPosition(pos);
+                    grabbedObject.body.position.copy(pos).add(grabOffset);
+                }
+            }
+
+            // Движение джойстиком
+            if (controllers[1] && controllers[1].gamepad) {
+                const axes = controllers[1].gamepad.axes;
+                const moveX = axes[2] || 0;
+                const moveZ = axes[3] || 0;
+                
+                const dir = new THREE.Vector3(moveX, 0, moveZ)
+                    .applyQuaternion(camera.quaternion);
+                dir.y = 0;
+                if (dir.lengthSq() > 0) dir.normalize();
+                
+                camera.position.x += dir.x * 0.12;
+                camera.position.z += dir.z * 0.12;
+            }
+
+            // Следование меню
+            if (isMenuOpen && menuMesh && controllers[1]) {
+                menuMesh.position.copy(controllers[1].position);
+                menuMesh.quaternion.copy(controllers[1].quaternion);
+                menuMesh.translateZ(-1.9);
+                menuMesh.translateY(0.5);
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // Простой VRButton
+        const VRButton = {
+            createButton: function(renderer) {
+                const btn = document.createElement('button');
+                btn.textContent = '▶ ENTER VR';
+                btn.style.position = 'absolute';
+                btn.style.top = '30px';
+                btn.style.left = '50%';
+                btn.style.transform = 'translateX(-50%)';
+                btn.style.padding = '18px 50px';
+                btn.style.fontSize = '22px';
+                btn.style.background = '#0a0';
+                btn.style.color = '#fff';
+                btn.style.border = 'none';
+                btn.style.borderRadius = '12px';
+                btn.style.cursor = 'pointer';
+                btn.onclick = () => renderer.xr.setSessionMode && renderer.xr.setSessionMode('immersive-vr');
+                return btn;
+            }
+        };
+
+        window.onload = init;
+    </script>
+</body>
+</html>
