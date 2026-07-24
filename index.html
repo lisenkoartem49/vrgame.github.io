@@ -2,22 +2,131 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VR Block Builder - Meta Quest 3</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: Arial, sans-serif; }
-        #ui { position: absolute; top: 10px; left: 10px; color: white; z-index: 10; }
-        #instructions { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); color: #aaa; text-align: center; }
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        #ui { position: absolute; top: 15px; left: 15px; color: white; z-index: 10; font-size: 14px; text-shadow: 1px 1px 2px black; }
+        #instructions { position: absolute; bottom: 70px; left: 50%; transform: translateX(-50%); color: #ccc; text-align: center; font-size: 15px; text-shadow: 1px 1px 3px black; pointer-events: none; }
+        #debug { position: absolute; top: 40px; left: 15px; color: #ffeb3b; z-index: 10; font-size: 13px; font-family: monospace; background: rgba(0,0,0,0.6); padding: 6px 10px; border-radius: 4px; max-width: 90%; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
 </head>
 <body>
-    <div id="ui">Нажмите squeeze (сжатие) на правом контроллере для меню</div>
-    <div id="instructions">Правый джойстик — ходить<br>Триггер — хватать и двигать блоки</div>
+    <div id="ui">Quest 3: Squeeze (Хват) — меню | Правый стик — ходьба | Триггер — действия</div>
+    <div id="debug">Инициализация WebXR...</div>
+    <div id="instructions">Нажмите кнопку ниже для входа в VR</div>
 
     <script>
-        // === Основные переменные ===
-        let scene, camera, renderer;
+        function logStatus(msg) {
+            console.log('[VR Log]', msg);
+            const debugEl = document.getElementById('debug');
+            if (debugEl) debugEl.innerText = msg;
+        }
+
+        // Улучшенная версия VRButton с диагностикой ошибок WebXR
+        const VRButton = {
+            createButton: function(renderer) {
+                const button = document.createElement('button');
+                button.style.position = 'absolute';
+                button.style.bottom = '20px';
+                button.style.left = 'calc(50% - 100px)';
+                button.style.width = '200px';
+                button.style.padding = '12px 6px';
+                button.style.border = '1px solid #fff';
+                button.style.borderRadius = '6px';
+                button.style.background = 'rgba(0,0,0,0.85)';
+                button.style.color = '#fff';
+                button.style.font = 'bold 16px sans-serif';
+                button.style.textAlign = 'center';
+                button.style.opacity = '0.95';
+                button.style.outline = 'none';
+                button.style.zIndex = '999';
+                button.style.cursor = 'pointer';
+
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost' && location.hostname !== '127.0.0.1') {
+                    button.textContent = 'ТРЕБУЕТСЯ HTTPS';
+                    logStatus('ОШИБКА: WebXR работает только по защищенному протоколу HTTPS!');
+                    return button;
+                }
+
+                if ('xr' in navigator) {
+                    button.textContent = 'ПРОВЕРКА VR...';
+                    
+                    navigator.xr.isSessionSupported('immersive-vr').then(function (supported) {
+                        if (supported) {
+                            showEnterVR();
+                            logStatus('Готово к запуску VR. Нажмите кнопку ▶ ВОЙТИ В VR');
+                        } else {
+                            button.textContent = 'VR НЕ ПОДДЕРЖИВАЕТСЯ';
+                            logStatus('Устройство или браузер не поддерживает режим immersive-vr');
+                        }
+                    }).catch(function(err) {
+                        button.textContent = 'ОШИБКА WEBXR';
+                        logStatus('Ошибка проверки WebXR: ' + err.message);
+                    });
+                } else {
+                    button.textContent = 'WEBXR НЕ НАЙДЕН';
+                    logStatus('Браузер не поддерживает WebXR API. Используйте Meta Quest Browser.');
+                }
+
+                function showEnterVR() {
+                    let currentSession = null;
+                    button.textContent = '▶ ВОЙТИ В VR';
+
+                    async function onSessionStarted(session) {
+                        session.addEventListener('end', onSessionEnded);
+                        try {
+                            await renderer.xr.setSession(session);
+                            button.textContent = 'ВЫЙТИ ИЗ VR';
+                            currentSession = session;
+                            logStatus('VR сессия успешно запущена!');
+                        } catch (e) {
+                            logStatus('Ошибка установки сессии в Three.js: ' + e.message);
+                        }
+                    }
+
+                    function onSessionEnded() {
+                        currentSession.removeEventListener('end', onSessionEnded);
+                        button.textContent = '▶ ВОЙТИ В VR';
+                        currentSession = null;
+                        logStatus('Вышли из VR сессии');
+                    }
+
+                    button.onclick = function () {
+                        if (currentSession === null) {
+                            logStatus('Запрос сессии VR...');
+                            
+                            // Запрашиваем базовую сессию с опциональными фичами
+                            const sessionInit = {
+                                optionalFeatures: ['local-floor', 'bounded-floor', 'hand-tracking']
+                            };
+
+                            navigator.xr.requestSession('immersive-vr', sessionInit)
+                                .then(onSessionStarted)
+                                .catch(function(err) {
+                                    // Пробуем еще раз без опциональных параметров, если стандартный запрос отклонен
+                                    logStatus('Первичный запрос не прошел: ' + err.message + '. Пробуем минимальный режим...');
+                                    
+                                    navigator.xr.requestSession('immersive-vr')
+                                        .then(onSessionStarted)
+                                        .catch(function(err2) {
+                                            logStatus('Ошибка входа в VR: ' + err2.message);
+                                            alert('Не удалось войти в VR: ' + err2.message);
+                                        });
+                                });
+                        } else {
+                            currentSession.end();
+                        }
+                    };
+                }
+
+                return button;
+            }
+        };
+
+        let scene, camera, renderer, player;
         let world;
         let blocks = [];
         let controllers = [];
@@ -29,23 +138,25 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x222222);
-            scene.fog = new THREE.Fog(0x222222, 10, 50);
+            scene.background = new THREE.Color(0x2a2a35);
+            scene.fog = new THREE.Fog(0x2a2a35, 10, 50);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
+            player = new THREE.Group();
+            scene.add(player);
+            player.add(camera);
+
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
+            renderer.xr.enabled = true; // Обязательно перед созданием кнопки
             renderer.shadowMap.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // VR Button
-            const vrButton = VRButton.createButton(renderer);
-            document.body.appendChild(vrButton);
+            // Создаем кнопку VR
+            document.body.appendChild(VRButton.createButton(renderer));
 
-            // Свет
-            const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+            const ambient = new THREE.AmbientLight(0xffffff, 0.5);
             scene.add(ambient);
             const directional = new THREE.DirectionalLight(0xffffff, 0.8);
             directional.position.set(10, 20, 10);
@@ -54,13 +165,18 @@
 
             // Пол
             const floorGeo = new THREE.PlaneGeometry(50, 50);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x555555 });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.8 });
             const floor = new THREE.Mesh(floorGeo, floorMat);
             floor.rotation.x = -Math.PI / 2;
             floor.receiveShadow = true;
             scene.add(floor);
 
-            // Physics
+            const grid = new THREE.GridHelper(50, 50, 0x000000, 0x000000);
+            grid.material.opacity = 0.2;
+            grid.material.transparent = true;
+            scene.add(grid);
+
+            // Физика
             world = new CANNON.World();
             world.gravity.set(0, -9.82, 0);
             world.broadphase = new CANNON.NaiveBroadphase();
@@ -81,18 +197,22 @@
         function setupControllers() {
             const controller1 = renderer.xr.getController(0);
             const controller2 = renderer.xr.getController(1);
-            scene.add(controller1);
-            scene.add(controller2);
+            
+            player.add(controller1);
+            player.add(controller2);
 
             controllers = [controller1, controller2];
 
-            // Хватание триггером
+            const geometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -5)]);
+            const material = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 });
+            controller1.add(new THREE.Line(geometry, material));
+            controller2.add(new THREE.Line(geometry, material));
+
             controller1.addEventListener('selectstart', () => handleGrab(controller1, true));
             controller1.addEventListener('selectend', () => handleGrab(controller1, false));
             controller2.addEventListener('selectstart', () => handleGrab(controller2, true));
             controller2.addEventListener('selectend', () => handleGrab(controller2, false));
 
-            // Меню на squeeze
             controller2.addEventListener('squeezestart', toggleMenu);
         }
 
@@ -106,7 +226,19 @@
                 raycaster.ray.origin.setFromMatrixPosition(controller.matrixWorld);
                 raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix);
 
-                const intersects = raycaster.intersectObjects(blocks.map(b => b.mesh));
+                if (isMenuOpen && menuMesh) {
+                    const menuIntersects = raycaster.intersectObjects(menuMesh.children, true);
+                    if (menuIntersects.length > 0) {
+                        const hit = menuIntersects[0].object;
+                        if (hit.userData && hit.userData.onClick) {
+                            hit.userData.onClick();
+                            return;
+                        }
+                    }
+                }
+
+                const blockMeshes = blocks.map(b => b.mesh);
+                const intersects = raycaster.intersectObjects(blockMeshes);
                 
                 if (intersects.length > 0) {
                     const hitMesh = intersects[0].object;
@@ -119,6 +251,8 @@
                 }
             } else if (grabbedObject) {
                 grabbedObject.body.type = CANNON.Body.DYNAMIC;
+                grabbedObject.body.velocity.set(0, 0, 0);
+                grabbedObject.body.angularVelocity.set(0, 0, 0);
                 grabbedObject = null;
             }
         }
@@ -142,26 +276,32 @@
                 new THREE.PlaneGeometry(2.8, 2.2),
                 new THREE.MeshBasicMaterial({ color: 0x222233, side: THREE.DoubleSide })
             );
-            panel.position.set(0, 0.1, -2);
+            panel.position.set(0, 0.1, 0);
             menuGroup.add(panel);
 
-            // Spawn
-            const spawnBtn = createInteractiveButton("Заспавнить", 1.2, 0.35, () => spawnBlock());
-            spawnBtn.position.set(0, 0.8, -1.9);
+            const spawnBtn = createInteractiveButton(1.2, 0.35, 0x4488ff, () => spawnBlock());
+            spawnBtn.position.set(0, 0.8, 0.01);
             menuGroup.add(spawnBtn);
 
-            // Colors
             colors.forEach((col, i) => {
-                const btn = createColorButton(col, () => selectedColor = col);
-                btn.position.set(-1 + i * 0.4, 0.1, -1.9);
+                const btn = createInteractiveButton(0.28, 0.28, col, () => {
+                    selectedColor = col;
+                    btn.scale.set(1.2, 1.2, 1.2);
+                    setTimeout(() => btn.scale.set(1, 1, 1), 200);
+                });
+                btn.position.set(-1 + i * 0.4, 0.1, 0.01);
                 menuGroup.add(btn);
             });
 
-            // Sizes
             const sizes = [0.5, 1, 1.8];
             sizes.forEach((sz, i) => {
-                const btn = createInteractiveButton(sz + "м", 0.5, 0.3, () => selectedSize = sz);
-                btn.position.set(-0.9 + i * 0.9, -0.6, -1.9);
+                const color = (sz === 1) ? 0x888888 : 0x666666;
+                const btn = createInteractiveButton(0.5, 0.3, color, () => {
+                    selectedSize = sz;
+                    btn.scale.set(1.1, 1.1, 1.1);
+                    setTimeout(() => btn.scale.set(1, 1, 1), 200);
+                });
+                btn.position.set(-0.9 + i * 0.9, -0.6, 0.01);
                 menuGroup.add(btn);
             });
 
@@ -169,30 +309,19 @@
             if (rightController) {
                 menuGroup.position.copy(rightController.position);
                 menuGroup.quaternion.copy(rightController.quaternion);
-                menuGroup.translateZ(-1.9);
-                menuGroup.translateY(0.5);
+                menuGroup.translateZ(-1.5);
+                menuGroup.translateY(0.3);
             }
             
-            scene.add(menuGroup);
+            player.add(menuGroup);
             menuMesh = menuGroup;
         }
 
-        function createInteractiveButton(text, w, h, onClick) {
+        function createInteractiveButton(w, h, color, onClick) {
             const group = new THREE.Group();
             const mesh = new THREE.Mesh(
                 new THREE.PlaneGeometry(w, h),
-                new THREE.MeshBasicMaterial({ color: 0x4488ff })
-            );
-            group.add(mesh);
-            mesh.userData.onClick = onClick;
-            return group;
-        }
-
-        function createColorButton(color, onClick) {
-            const group = new THREE.Group();
-            const mesh = new THREE.Mesh(
-                new THREE.BoxGeometry(0.28, 0.28, 0.1),
-                new THREE.MeshBasicMaterial({ color })
+                new THREE.MeshBasicMaterial({ color: color })
             );
             group.add(mesh);
             mesh.userData.onClick = onClick;
@@ -203,19 +332,21 @@
             const size = selectedSize;
             const mesh = new THREE.Mesh(
                 new THREE.BoxGeometry(size, size, size),
-                new THREE.MeshStandardMaterial({ color: selectedColor })
+                new THREE.MeshStandardMaterial({ color: selectedColor, roughness: 0.3, metalness: 0.1 })
             );
-            mesh.castShadow = mesh.receiveShadow = true;
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
 
             const spawnPos = new THREE.Vector3(0, 1.5, -2)
                 .applyQuaternion(camera.quaternion)
+                .add(player.position)
                 .add(camera.position);
             
             mesh.position.copy(spawnPos);
             scene.add(mesh);
 
             const shape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
-            const body = new CANNON.Body({ mass: 1 });
+            const body = new CANNON.Body({ mass: size * 5 });
             body.addShape(shape);
             body.position.copy(spawnPos);
             world.addBody(body);
@@ -230,8 +361,6 @@
         }
 
         function animate() {
-            if (!renderer.xr.isPresenting) return;
-
             const delta = 0.016;
             world.step(delta);
 
@@ -240,61 +369,43 @@
                 block.mesh.quaternion.copy(block.body.quaternion);
             });
 
-            if (grabbedObject && controllers.length > 0) {
-                const ctrl = controllers[0] || controllers[1];
-                if (ctrl) {
-                    const pos = new THREE.Vector3();
-                    ctrl.getWorldPosition(pos);
-                    grabbedObject.body.position.copy(pos).add(grabOffset);
+            if (renderer.xr.isPresenting) {
+                if (grabbedObject && controllers.length > 0) {
+                    const ctrl = controllers[0] || controllers[1];
+                    if (ctrl) {
+                        const pos = new THREE.Vector3();
+                        ctrl.getWorldPosition(pos);
+                        grabbedObject.body.position.copy(pos).add(grabOffset);
+                    }
                 }
-            }
 
-            // Движение джойстиком
-            if (controllers[1] && controllers[1].gamepad) {
-                const axes = controllers[1].gamepad.axes;
-                const moveX = axes[2] || 0;
-                const moveZ = axes[3] || 0;
-                
-                const dir = new THREE.Vector3(moveX, 0, moveZ)
-                    .applyQuaternion(camera.quaternion);
-                dir.y = 0;
-                if (dir.lengthSq() > 0) dir.normalize();
-                
-                camera.position.x += dir.x * 0.12;
-                camera.position.z += dir.z * 0.12;
-            }
-
-            // Следование меню
-            if (isMenuOpen && menuMesh && controllers[1]) {
-                menuMesh.position.copy(controllers[1].position);
-                menuMesh.quaternion.copy(controllers[1].quaternion);
-                menuMesh.translateZ(-1.9);
-                menuMesh.translateY(0.5);
+                const session = renderer.xr.getSession();
+                if (session && session.inputSources) {
+                    for (let source of session.inputSources) {
+                        if (source.handedness === 'right' && source.gamepad) {
+                            const axes = source.gamepad.axes;
+                            const moveX = axes[2] || 0; 
+                            const moveZ = axes[3] || 0;
+                            
+                            if (Math.abs(moveX) > 0.1 || Math.abs(moveZ) > 0.1) {
+                                const dir = new THREE.Vector3(moveX, 0, moveZ);
+                                dir.applyQuaternion(camera.quaternion);
+                                dir.y = 0;
+                                
+                                if (dir.lengthSq() > 0) {
+                                    dir.normalize();
+                                    const speed = 0.08;
+                                    player.position.x += dir.x * speed;
+                                    player.position.z += dir.z * speed;
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             renderer.render(scene, camera);
         }
-
-        // Простой VRButton
-        const VRButton = {
-            createButton: function(renderer) {
-                const btn = document.createElement('button');
-                btn.textContent = '▶ ENTER VR';
-                btn.style.position = 'absolute';
-                btn.style.top = '30px';
-                btn.style.left = '50%';
-                btn.style.transform = 'translateX(-50%)';
-                btn.style.padding = '18px 50px';
-                btn.style.fontSize = '22px';
-                btn.style.background = '#0a0';
-                btn.style.color = '#fff';
-                btn.style.border = 'none';
-                btn.style.borderRadius = '12px';
-                btn.style.cursor = 'pointer';
-                btn.onclick = () => renderer.xr.setSessionMode && renderer.xr.setSessionMode('immersive-vr');
-                return btn;
-            }
-        };
 
         window.onload = init;
     </script>
