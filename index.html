@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>VR Block Builder - v4.0</title>
+    <title>VR Block Builder - v4.1</title>
     <style>
         body {
             margin: 0;
@@ -78,15 +78,14 @@
         <p>Строй и играй с физическими кубиками в VR</p>
         <button id="vr-btn">ВОЙТИ В VR</button>
     </div>
-    <div id="info">A (левый) — меню &nbsp;|&nbsp; Trigger — спавн/выбор &nbsp;|&nbsp; Grip — захват &nbsp;|&nbsp; B — рандомный цвет</div>
+    <div id="info">A (левый) — меню &nbsp;|&nbsp; Trigger — спавн &nbsp;|&nbsp; Grip — захват &nbsp;|&nbsp; B — рандом</div>
 
     <script>
         // ============================================================
-        //  ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+        //  ГЛОБАЛЬНЫЕ
         // ============================================================
         let scene, camera, renderer, world;
         let playerRig;
-        let controllers = [];
         let leftController = null,
             rightController = null;
         let blocks = [];
@@ -96,19 +95,16 @@
         let isMenuOpen = false;
         let menuCooldown = false;
 
-        // Настройки спавна
-        const BASE_SIZE = 0.35; // увеличенный базовый размер для VR
+        const BASE_SIZE = 0.5; // увеличенный размер для VR
         let selectedSize = BASE_SIZE;
         let selectedColor = 0xff1744;
 
-        // Доступные размеры
         const SIZES = [
-            { id: 'small', label: 'S', value: 0.25 },
-            { id: 'medium', label: 'M', value: 0.35 },
-            { id: 'large', label: 'L', value: 0.50 },
+            { id: 'small', label: 'S', value: 0.35 },
+            { id: 'medium', label: 'M', value: 0.50 },
+            { id: 'large', label: 'L', value: 0.70 },
         ];
 
-        // Цвета для меню
         const COLORS = [
             { id: 'red', hex: 0xff1744, label: 'Красный' },
             { id: 'blue', hex: 0x2979ff, label: 'Синий' },
@@ -118,24 +114,20 @@
             { id: 'orange', hex: 0xff9100, label: 'Оранжевый' },
         ];
 
-        // Переменные для захвата
-        let grabbedBlock = null; // { mesh, body, offset, controller }
+        let grabbedBlock = null;
         let grabCooldown = false;
 
         // ============================================================
         //  ИНИЦИАЛИЗАЦИЯ
         // ============================================================
         function init() {
-            // --- Scene ---
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x101018);
             scene.fog = new THREE.Fog(0x101018, 8, 18);
 
-            // --- Camera ---
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
             camera.position.set(0, 1.6, 0);
 
-            // --- Renderer ---
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -146,7 +138,6 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // --- Physics World ---
             world = new CANNON.World();
             world.gravity.set(0, -9.81, 0);
             world.broadphase = new CANNON.NaiveBroadphase();
@@ -166,14 +157,13 @@
             });
             world.addContactMaterial(contactMat2);
 
-            // --- Player Rig ---
             playerRig = new THREE.Group();
             playerRig.position.set(0, 0, 0);
             scene.add(playerRig);
             playerRig.add(camera);
             camera.position.set(0, 1.6, 0);
 
-            // --- Floor ---
+            // Пол
             const floorGeo = new THREE.PlaneGeometry(40, 40);
             const floorMat3 = new THREE.MeshStandardMaterial({
                 color: 0x222233,
@@ -197,7 +187,7 @@
             gridHelper.position.y = 0.001;
             scene.add(gridHelper);
 
-            // --- Lighting ---
+            // Свет
             const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
             scene.add(ambientLight);
             const hemiLight = new THREE.HemisphereLight(0x8888ff, 0x444422, 0.8);
@@ -218,10 +208,9 @@
             fillLight.position.set(-5, 3, -5);
             scene.add(fillLight);
 
-            // --- Controllers ---
             setupControllers();
 
-            // --- VR Entry ---
+            // Вход в VR
             document.getElementById('vr-btn').addEventListener('click', async () => {
                 try {
                     const session = await navigator.xr.requestSession('immersive-vr', {
@@ -245,70 +234,134 @@
         }
 
         // ============================================================
-        //  КОНТРОЛЛЕРЫ
+        //  КОНТРОЛЛЕРЫ + СОБЫТИЯ
         // ============================================================
         function setupControllers() {
-            controllers.forEach(c => playerRig.remove(c));
-            controllers = [];
-            leftController = null;
-            rightController = null;
-
-            for (let i = 0; i < 2; i++) {
-                const controller = renderer.xr.getController(i);
-                controller.userData.handedness = i === 0 ? 'left' : 'right';
-
-                const handGroup = new THREE.Group();
-                // Сфера руки
-                const sphereGeo = new THREE.SphereGeometry(0.045, 24, 24);
-                const sphereMat = new THREE.MeshStandardMaterial({
-                    color: i === 0 ? 0x4488ff : 0xff8844,
-                    roughness: 0.2,
-                    metalness: 0.8,
-                    emissive: i === 0 ? 0x2244aa : 0xaa4422,
-                    emissiveIntensity: 0.3,
-                });
-                const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-                sphere.castShadow = true;
-                handGroup.add(sphere);
-
-                const ringGeo = new THREE.TorusGeometry(0.055, 0.008, 16, 32);
-                const ringMat = new THREE.MeshStandardMaterial({
-                    color: i === 0 ? 0x4488ff : 0xff8844,
-                    emissive: i === 0 ? 0x4488ff : 0xff8844,
-                    emissiveIntensity: 0.5,
-                    transparent: true,
-                    opacity: 0.6,
-                });
-                const ring = new THREE.Mesh(ringGeo, ringMat);
-                ring.rotation.x = Math.PI / 2;
-                ring.position.y = -0.01;
-                handGroup.add(ring);
-
-                const tipGeo = new THREE.ConeGeometry(0.015, 0.04, 8);
-                const tipMat = new THREE.MeshStandardMaterial({
-                    color: i === 0 ? 0x88ccff : 0xffaa66,
-                    emissive: i === 0 ? 0x4488ff : 0xff8844,
-                    emissiveIntensity: 0.3,
-                });
-                const tip = new THREE.Mesh(tipGeo, tipMat);
-                tip.position.set(0, 0, -0.05);
-                handGroup.add(tip);
-
-                controller.add(handGroup);
-                playerRig.add(controller);
-
-                if (i === 0) leftController = controller;
-                else rightController = controller;
-
-                controllers.push(controller);
+            // Удаляем старые
+            if (leftController) {
+                leftController.removeEventListener('select', onLeftSelect);
+                leftController.removeEventListener('squeeze', onLeftSqueeze);
             }
+            if (rightController) {
+                rightController.removeEventListener('select', onRightSelect);
+                rightController.removeEventListener('squeeze', onRightSqueeze);
+            }
+
+            // Создаём заново
+            const controllers = renderer.xr.getController(0); // left
+            const controllersR = renderer.xr.getController(1); // right
+
+            // Левая рука
+            leftController = controllers;
+            leftController.userData.handedness = 'left';
+            playerRig.add(leftController);
+
+            // Правая рука
+            rightController = controllersR;
+            rightController.userData.handedness = 'right';
+            playerRig.add(rightController);
+
+            // Визуализация рук (простая)
+            addHandVisuals(leftController, 0x4488ff);
+            addHandVisuals(rightController, 0xff8844);
+
+            // События
+            leftController.addEventListener('select', onLeftSelect);
+            leftController.addEventListener('squeeze', onLeftSqueeze);
+            rightController.addEventListener('select', onRightSelect);
+            rightController.addEventListener('squeeze', onRightSqueeze);
+        }
+
+        function addHandVisuals(controller, color) {
+            const group = new THREE.Group();
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.045, 24, 24),
+                new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0.8, emissive: color,
+                    emissiveIntensity: 0.3 })
+            );
+            sphere.castShadow = true;
+            group.add(sphere);
+
+            const ring = new THREE.Mesh(
+                new THREE.TorusGeometry(0.055, 0.008, 16, 32),
+                new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, transparent: true,
+                    opacity: 0.6 })
+            );
+            ring.rotation.x = Math.PI / 2;
+            ring.position.y = -0.01;
+            group.add(ring);
+
+            const tip = new THREE.Mesh(
+                new THREE.ConeGeometry(0.015, 0.04, 8),
+                new THREE.MeshStandardMaterial({ color: 0x88ccff, emissive: color, emissiveIntensity: 0.3 })
+            );
+            tip.position.set(0, 0, -0.05);
+            group.add(tip);
+
+            controller.add(group);
         }
 
         // ============================================================
-        //  МЕНЮ (С ЦВЕТАМИ И РАЗМЕРАМИ)
+        //  ОБРАБОТЧИКИ СОБЫТИЙ
+        // ============================================================
+        function onLeftSelect() {
+            // Кнопка A (select) — открыть/закрыть меню
+            if (!menuCooldown) {
+                menuCooldown = true;
+                buildMenu();
+                setTimeout(() => { menuCooldown = false; }, 400);
+            }
+        }
+
+        function onLeftSqueeze() {
+            // Grip левой руки — захват
+            tryGrab(leftController);
+        }
+
+        function onRightSelect() {
+            // Trigger правой руки — спавн или выбор в меню
+            if (isMenuOpen && hoveredItem) {
+                const data = hoveredItem.userData;
+                if (data.type === 'color') {
+                    selectedColor = data.colorData.hex;
+                    // опционально закрыть меню
+                    // buildMenu();
+                } else if (data.type === 'size') {
+                    selectedSize = data.sizeData.value;
+                    // обновить подсветку
+                    menuItems.forEach(item => {
+                        if (item.userData.type === 'size' && item.userData.glow) {
+                            const isSel = Math.abs(item.userData.sizeData.value - selectedSize) < 0.001;
+                            item.userData.glow.material.opacity = isSel ? 0.4 : 0;
+                        }
+                    });
+                } else if (data.type === 'clear') {
+                    clearAllCubes();
+                }
+            } else if (!isMenuOpen) {
+                // Спавн
+                if (!menuCooldown) {
+                    spawnCube(selectedColor, selectedSize);
+                    menuCooldown = true;
+                    setTimeout(() => { menuCooldown = false; }, 200);
+                }
+            }
+        }
+
+        function onRightSqueeze() {
+            // Grip правой руки — захват
+            tryGrab(rightController);
+        }
+
+        // Дополнительно: отпускаем захват при отпускании грипа
+        // Но мы будем проверять в цикле, если кнопка не нажата — отпускаем
+
+        // ============================================================
+        //  МЕНЮ
         // ============================================================
         function buildMenu() {
             if (menuGroup) {
+                // Закрыть
                 playerRig.remove(menuGroup);
                 menuGroup.traverse(child => {
                     if (child.isMesh) {
@@ -327,10 +380,11 @@
                 return;
             }
 
+            // Открыть
             menuGroup = new THREE.Group();
             menuGroup.position.set(0, 1.4, -0.9);
 
-            // --- Панель ---
+            // Панель
             const panelGeo = new THREE.PlaneGeometry(0.9, 1.2);
             const panelMat = new THREE.MeshStandardMaterial({
                 color: 0x1a1a2e,
@@ -372,7 +426,7 @@
             titleSprite.scale.set(0.7, 0.11, 1);
             menuGroup.add(titleSprite);
 
-            // --- Цвета (сетка 3x2) ---
+            // Цвета (сетка 3x2)
             const cols = 3,
                 rows = 2;
             const spacingX = 0.26,
@@ -441,7 +495,6 @@
                 btnMesh.position.set(x, y, 0);
                 btnMesh.userData.colorData = colorData;
                 btnMesh.userData.isMenuItem = true;
-                btnMesh.userData.index = index;
                 btnMesh.userData.type = 'color';
                 btnMesh.castShadow = true;
                 menuGroup.add(btnMesh);
@@ -462,7 +515,7 @@
                 btnMesh.userData.glow = glow;
             });
 
-            // --- Размеры (ряд снизу) ---
+            // Размеры
             const sizeStartY = -0.25;
             const sizeSpacing = 0.22;
             const sizeStartX = -(SIZES.length - 1) * sizeSpacing / 2;
@@ -489,14 +542,12 @@
                 bCtx.lineTo(0, radius);
                 bCtx.quadraticCurveTo(0, 0, radius, 0);
                 bCtx.closePath();
-                // Фон
                 const isSelected = Math.abs(sizeData.value - selectedSize) < 0.001;
                 bCtx.fillStyle = isSelected ? '#4a4aff' : '#2a2a4a';
                 bCtx.fill();
                 bCtx.strokeStyle = isSelected ? '#88aaff' : '#445566';
                 bCtx.lineWidth = 3;
                 bCtx.stroke();
-                // Текст
                 bCtx.textAlign = 'center';
                 bCtx.textBaseline = 'middle';
                 bCtx.font = 'bold 48px Arial, sans-serif';
@@ -520,7 +571,6 @@
                 btnMesh.userData.sizeData = sizeData;
                 btnMesh.userData.isMenuItem = true;
                 btnMesh.userData.type = 'size';
-                btnMesh.userData.index = idx + 100;
                 btnMesh.castShadow = true;
                 menuGroup.add(btnMesh);
                 menuItems.push(btnMesh);
@@ -540,7 +590,7 @@
                 btnMesh.userData.glow = glow;
             });
 
-            // --- Кнопка "Очистить всё" ---
+            // Очистить
             const clearData = { id: 'clear', label: '🗑️ Очистить' };
             const cCanvas = document.createElement('canvas');
             cCanvas.width = 256;
@@ -625,7 +675,7 @@
         }
 
         // ============================================================
-        //  СПАВН КУБИКА
+        //  СПАВН
         // ============================================================
         function spawnCube(colorHex, size, position) {
             if (!position) {
@@ -634,8 +684,8 @@
                     rightController.getWorldPosition(pos);
                     const dir = new THREE.Vector3(0, 0, -1);
                     dir.applyQuaternion(rightController.quaternion);
-                    position = pos.clone().add(dir.multiplyScalar(0.35));
-                    position.y += 0.05;
+                    position = pos.clone().add(dir.multiplyScalar(0.4));
+                    position.y += 0.1;
                 } else {
                     const pos = new THREE.Vector3(0, 1.5, -1);
                     pos.applyMatrix4(camera.matrixWorld);
@@ -686,7 +736,7 @@
             const entry = { mesh, body, color: finalColor.getHex(), size: s };
             blocks.push(entry);
 
-            // Анимация появления
+            // Анимация
             mesh.scale.set(0.01, 0.01, 0.01);
             let sc = 0.01;
             const targetS = 1;
@@ -722,7 +772,7 @@
         }
 
         // ============================================================
-        //  ЗАХВАТ БЛОКОВ
+        //  ЗАХВАТ
         // ============================================================
         function tryGrab(controller) {
             if (grabbedBlock || grabCooldown) return;
@@ -734,7 +784,6 @@
             dir.applyQuaternion(controller.quaternion);
 
             const raycaster = new THREE.Raycaster(origin, dir, 0.05, 2.0);
-            // Собираем все меши блоков
             const meshes = blocks.map(b => b.mesh);
             const intersects = raycaster.intersectObjects(meshes);
 
@@ -742,22 +791,16 @@
                 const hitMesh = intersects[0].object;
                 const entry = blocks.find(b => b.mesh === hitMesh);
                 if (entry) {
-                    // Захватываем
                     grabbedBlock = {
                         entry: entry,
                         controller: controller,
                         offset: new THREE.Vector3().copy(entry.mesh.position).sub(origin),
                     };
-                    // Делаем тело статичным (mass=0)
                     entry.body.type = CANNON.Body.STATIC;
                     entry.body.mass = 0;
                     entry.body.updateMassProperties();
                     grabCooldown = true;
                     setTimeout(() => { grabCooldown = false; }, 100);
-                    // Вибрация
-                    if (controller.userData.handedness === 'right' && rightController) {
-                        // можно вибрировать
-                    }
                 }
             }
         }
@@ -765,11 +808,9 @@
         function releaseGrab() {
             if (grabbedBlock) {
                 const entry = grabbedBlock.entry;
-                // Возвращаем динамику
                 entry.body.type = CANNON.Body.DYNAMIC;
                 entry.body.mass = 0.5 + Math.random() * 0.5;
                 entry.body.updateMassProperties();
-                // Обнуляем скорость
                 entry.body.velocity.set(0, 0, 0);
                 entry.body.angularVelocity.set(0, 0, 0);
                 grabbedBlock = null;
@@ -782,21 +823,18 @@
             const origin = new THREE.Vector3();
             controller.getWorldPosition(origin);
             const targetPos = origin.clone().add(offset);
-            // Добавляем небольшое смещение вперед для удобства
             const dir = new THREE.Vector3(0, 0, -1);
             dir.applyQuaternion(controller.quaternion);
             targetPos.add(dir.multiplyScalar(0.05));
 
             entry.body.position.copy(targetPos);
-            // Копируем поворот контроллера (с небольшим смещением)
             entry.body.quaternion.copy(controller.quaternion);
-            // Также обновляем меш
             entry.mesh.position.copy(entry.body.position);
             entry.mesh.quaternion.copy(entry.body.quaternion);
         }
 
         // ============================================================
-        //  RAYCASTER ДЛЯ МЕНЮ
+        //  МЕНЮ RAYCASTER (для подсветки)
         // ============================================================
         function updateMenuInteraction() {
             if (!isMenuOpen || !menuGroup || !rightController) return;
@@ -832,143 +870,38 @@
         }
 
         // ============================================================
-        //  ОБРАБОТКА ВВОДА
-        // ============================================================
-        function handleInput() {
-            const session = renderer.xr.getSession();
-            if (!session) return;
-
-            session.inputSources.forEach(source => {
-                if (!source.gamepad) return;
-                const gamepad = source.gamepad;
-                const handedness = source.handedness;
-
-                // --- Левая рука: движение + кнопка A для меню ---
-                if (handedness === 'left') {
-                    const axes = gamepad.axes;
-                    if (axes.length >= 4) {
-                        const forward = new THREE.Vector3(0, 0, -1);
-                        forward.applyQuaternion(playerRig.quaternion);
-                        const moveZ = -axes[3] * 0.06;
-                        const moveX = axes[2] * 0.06;
-                        playerRig.position.x += forward.x * moveZ + new THREE.Vector3(1, 0, 0).applyQuaternion(playerRig
-                            .quaternion).x * moveX;
-                        playerRig.position.z += forward.z * moveZ + new THREE.Vector3(1, 0, 0).applyQuaternion(playerRig
-                            .quaternion).z * moveX;
-                    }
-
-                    // Кнопка A (index 2) — меню
-                    if (gamepad.buttons.length > 2 && gamepad.buttons[2] && gamepad.buttons[2].pressed) {
-                        if (!menuCooldown) {
-                            menuCooldown = true;
-                            buildMenu();
-                            setTimeout(() => { menuCooldown = false; }, 400);
-                        }
-                    }
-
-                    // Grip (index 4) — захват левой рукой
-                    if (gamepad.buttons.length > 4 && gamepad.buttons[4] && gamepad.buttons[4].pressed) {
-                        tryGrab(leftController);
-                    } else {
-                        // Отпускаем, если захвачен левой рукой
-                        if (grabbedBlock && grabbedBlock.controller === leftController) {
-                            releaseGrab();
-                        }
-                    }
-                }
-
-                // --- Правая рука: поворот, спавн, выбор в меню, захват ---
-                if (handedness === 'right') {
-                    const axes = gamepad.axes;
-                    const buttons = gamepad.buttons;
-
-                    // Поворот
-                    if (axes.length >= 4) {
-                        playerRig.rotation.y -= axes[2] * 0.035;
-                    }
-
-                    // Trigger (index 0) — спавн или выбор в меню
-                    if (buttons.length > 0 && buttons[0] && buttons[0].pressed) {
-                        if (isMenuOpen && hoveredItem) {
-                            const data = hoveredItem.userData;
-                            if (data.type === 'color') {
-                                selectedColor = data.colorData.hex;
-                                // Закрываем меню после выбора цвета (опционально)
-                                // buildMenu();
-                                if (source.hapticActuator) {
-                                    source.hapticActuator.pulse(0.3, 30);
-                                }
-                            } else if (data.type === 'size') {
-                                selectedSize = data.sizeData.value;
-                                // Обновить подсветку в меню
-                                menuItems.forEach(item => {
-                                    if (item.userData.type === 'size' && item.userData.glow) {
-                                        const isSel = Math.abs(item.userData.sizeData.value - selectedSize) <
-                                            0.001;
-                                        item.userData.glow.material.opacity = isSel ? 0.4 : 0;
-                                    }
-                                });
-                                if (source.hapticActuator) {
-                                    source.hapticActuator.pulse(0.2, 20);
-                                }
-                            } else if (data.type === 'clear') {
-                                clearAllCubes();
-                                if (source.hapticActuator) {
-                                    source.hapticActuator.pulse(0.5, 50);
-                                }
-                            }
-                        } else if (!isMenuOpen) {
-                            // Спавн
-                            if (!menuCooldown) {
-                                spawnCube(selectedColor, selectedSize);
-                                menuCooldown = true;
-                                setTimeout(() => { menuCooldown = false; }, 200);
-                            }
-                        }
-                    }
-
-                    // B button (index 3) — рандомный цвет
-                    if (buttons.length > 3 && buttons[3] && buttons[3].pressed) {
-                        if (!menuCooldown) {
-                            const randomColor = COLORS[Math.floor(Math.random() * COLORS.length)].hex;
-                            spawnCube(randomColor, selectedSize);
-                            menuCooldown = true;
-                            setTimeout(() => { menuCooldown = false; }, 250);
-                        }
-                    }
-
-                    // Grip (index 4) — захват правой рукой
-                    if (buttons.length > 4 && buttons[4] && buttons[4].pressed) {
-                        tryGrab(rightController);
-                    } else {
-                        if (grabbedBlock && grabbedBlock.controller === rightController) {
-                            releaseGrab();
-                        }
-                    }
-                }
-            });
-        }
-
-        // ============================================================
-        //  АНИМАЦИОННЫЙ ЦИКЛ
+        //  ОСНОВНОЙ ЦИКЛ
         // ============================================================
         function animate() {
             world.step(1 / 60, 1 / 60, 3);
 
-            // Синхронизация физики и мешей
             blocks.forEach(entry => {
                 entry.mesh.position.copy(entry.body.position);
                 entry.mesh.quaternion.copy(entry.body.quaternion);
             });
 
-            // Обновление захвата
             updateGrab();
 
-            // Обновление меню
-            updateMenuInteraction();
+            // Проверка отпускания грипа (если кнопка не нажата)
+            if (grabbedBlock) {
+                const controller = grabbedBlock.controller;
+                // Проверяем состояние грипа через gamepad
+                const session = renderer.xr.getSession();
+                if (session) {
+                    let gripPressed = false;
+                    session.inputSources.forEach(source => {
+                        if (source.handedness === controller.userData.handedness && source.gamepad) {
+                            const btn = source.gamepad.buttons[1]; // grip обычно index 1
+                            if (btn && btn.pressed) gripPressed = true;
+                        }
+                    });
+                    if (!gripPressed) {
+                        releaseGrab();
+                    }
+                }
+            }
 
-            // Обработка ввода
-            handleInput();
+            updateMenuInteraction();
 
             renderer.render(scene, camera);
         }
@@ -977,9 +910,8 @@
         //  ЗАПУСК
         // ============================================================
         init();
-        console.log('🧊 VR Block Builder v4.0');
-        console.log('🎮 A (левый) — меню | Trigger — спавн/выбор | Grip — захват | B — рандомный цвет');
-        console.log('🚶 Левый стик — ходьба | Правый стик — поворот');
+        console.log('🧊 VR Block Builder v4.1');
+        console.log('🎮 A (левый) — меню | Trigger — спавн | Grip — захват | B — рандом');
     </script>
 </body>
 </html>
