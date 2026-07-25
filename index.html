@@ -1,119 +1,295 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR Block Builder - Stable</title>
-    <style>
-        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
-        #overlay { 
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
-            display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            z-index: 999; background: #000; 
-        }
-        #vr-btn { padding: 20px 40px; font-size: 24px; cursor: pointer; background: #2ecc71; border: none; color: white; border-radius: 10px; }
-    </style>
-    <!-- Подключаем Three.js и Cannon.js -->
-    <script type="importmap">
-        {
-            "imports": {
-                "three": "https://unpkg.com/three@0.134.0/build/three.module.js",
-                "three/addons/": "https://unpkg.com/three@0.134.0/examples/jsm/"
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebXR - Интерактивная VR Игра</title>
+    
+    <!-- A-Frame Core -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    
+    <!-- Physics System -->
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-physics-system@v4.2.2/dist/aframe-physics-system.min.js"></script>
+    
+    <!-- A-Frame Extras (Movement Controls) -->
+    <script src="https://cdn.jsdelivr.net/gh/c-frame/aframe-extras@7.0.0/dist/aframe-extras.min.js"></script>
+    
+    <!-- Super Hands (Interaction) -->
+    <script src="https://unpkg.com/super-hands@3.0.3/dist/super-hands.min.js"></script>
+
+    <script>
+        /* * КОМПОНЕНТ: canvas-text
+         * Генерирует текстуру с русским текстом высокого разрешения 
+         * для кнопок и панелей, решая проблему кириллицы в A-Frame.
+         */
+        AFRAME.registerComponent('canvas-text', {
+            schema: {
+                text: {type: 'string', default: 'Текст'},
+                fontSize: {type: 'number', default: 80},
+                color: {type: 'color', default: '#ffffff'},
+                bgColor: {type: 'color', default: 'transparent'},
+                width: {type: 'number', default: 1024},
+                height: {type: 'number', default: 256},
+                borderRadius: {type: 'number', default: 40}
+            },
+            init: function () {
+                this.canvas = document.createElement('canvas');
+                this.ctx = this.canvas.getContext('2d');
+                this.update();
+            },
+            update: function () {
+                const d = this.data;
+                this.canvas.width = d.width;
+                this.canvas.height = d.height;
+                
+                this.ctx.clearRect(0, 0, d.width, d.height);
+                
+                // Отрисовка фона со скругленными углами
+                if (d.bgColor !== 'transparent') {
+                    this.ctx.fillStyle = d.bgColor;
+                    this.ctx.beginPath();
+                    this.ctx.moveTo(d.borderRadius, 0);
+                    this.ctx.arcTo(d.width, 0, d.width, d.height, d.borderRadius);
+                    this.ctx.arcTo(d.width, d.height, 0, d.height, d.borderRadius);
+                    this.ctx.arcTo(0, d.height, 0, 0, d.borderRadius);
+                    this.ctx.arcTo(0, 0, d.width, 0, d.borderRadius);
+                    this.ctx.closePath();
+                    this.ctx.fill();
+                }
+                
+                // Отрисовка текста
+                this.ctx.fillStyle = d.color;
+                this.ctx.font = `bold ${d.fontSize}px Arial, sans-serif`;
+                this.ctx.textAlign = 'center';
+                this.ctx.textBaseline = 'middle';
+                this.ctx.fillText(d.text, d.width / 2, d.height / 2);
+                
+                // Применение текстуры к материалу
+                this.el.setAttribute('material', {
+                    src: this.canvas,
+                    transparent: true,
+                    shader: 'flat'
+                });
             }
-        }
+        });
+
+        /* * КОМПОНЕНТ: ui-button
+         * Логика интерактивности кнопок (наведение, клик, вызов функций).
+         */
+        AFRAME.registerComponent('ui-button', {
+            schema: {
+                action: {type: 'string'},
+                hoverScale: {type: 'vec3', default: {x: 1.05, y: 1.05, z: 1.05}}
+            },
+            init: function() {
+                const el = this.el;
+                const data = this.data;
+                const originalScale = el.getAttribute('scale');
+
+                el.addEventListener('mouseenter', () => {
+                    el.setAttribute('scale', data.hoverScale);
+                });
+
+                el.addEventListener('mouseleave', () => {
+                    el.setAttribute('scale', originalScale);
+                });
+
+                el.addEventListener('click', () => {
+                    // Анимация нажатия
+                    el.setAttribute('scale', '0.95 0.95 0.95');
+                    setTimeout(() => el.setAttribute('scale', data.hoverScale), 100);
+                    
+                    // Выполнение действия
+                    if (data.action === 'spawn') this.spawnObject();
+                    if (data.action === 'clear') this.clearObjects();
+                    if (data.action === 'close') document.querySelector('#vr-menu').setAttribute('visible', false);
+                });
+            },
+            spawnObject: function() {
+                const scene = document.querySelector('a-scene');
+                const el = document.createElement('a-box');
+                
+                // Случайный яркий цвет
+                const colors = ['#FF3366', '#33CCFF', '#FFCC00', '#33FF66', '#9933FF'];
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                
+                // Размещение в пределах стола
+                const x = (Math.random() - 0.5) * 1.5;
+                const z = -1.5 + (Math.random() - 0.5) * 0.5;
+                
+                el.setAttribute('mixin', 'interactable');
+                el.setAttribute('class', 'grabbable spawned');
+                el.setAttribute('color', color);
+                el.setAttribute('width', '0.2');
+                el.setAttribute('height', '0.2');
+                el.setAttribute('depth', '0.2');
+                el.setAttribute('position', `${x} 1.5 ${z}`);
+                
+                scene.appendChild(el);
+            },
+            clearObjects: function() {
+                const objects = document.querySelectorAll('.spawned');
+                objects.forEach(obj => obj.parentNode.removeChild(obj));
+            }
+        });
+
+        /* * КОМПОНЕНТ: vr-menu-controller
+         * Управляет появлением меню по кнопке "A" прямо перед глазами игрока.
+         */
+        AFRAME.registerComponent('vr-menu-controller', {
+            init: function() {
+                this.menu = document.querySelector('#vr-menu');
+                this.camera = document.querySelector('#camera');
+                
+                this.el.addEventListener('abuttondown', () => {
+                    const isVisible = this.menu.getAttribute('visible');
+                    this.menu.setAttribute('visible', !isVisible);
+                    
+                    if (!isVisible) {
+                        // Расчет позиции перед камерой
+                        const camPos = new THREE.Vector3();
+                        this.camera.object3D.getWorldPosition(camPos);
+                        
+                        const rotation = this.camera.getAttribute('rotation');
+                        const euler = new THREE.Euler(0, THREE.MathUtils.degToRad(rotation.y), 0, 'YXZ');
+                        const forward = new THREE.Vector3(0, 0, -1.2).applyEuler(euler);
+                        
+                        const menuPos = camPos.clone().add(forward);
+                        
+                        // Установка позиции и поворота (на уровне груди/глаз)
+                        this.menu.setAttribute('position', `${menuPos.x} ${camPos.y - 0.2} ${menuPos.z}`);
+                        this.menu.setAttribute('rotation', `0 ${rotation.y} 0`);
+                    }
+                });
+            }
+        });
+
+        /* * КОМПОНЕНТ: smooth-turn
+         * Плавный поворот камеры с правого джойстика.
+         */
+        AFRAME.registerComponent('smooth-turn', {
+            schema: { speed: { default: 60 } },
+            init: function() {
+                this.xAxis = 0;
+                this.el.addEventListener('thumbstickmoved', (e) => {
+                    this.xAxis = e.detail.x;
+                });
+            },
+            tick: function(time, timeDelta) {
+                // Мертвая зона стика
+                if (Math.abs(this.xAxis) > 0.15) {
+                    const rig = document.querySelector('#rig');
+                    const currentRot = rig.getAttribute('rotation');
+                    const delta = (this.xAxis * this.data.speed * timeDelta) / 1000;
+                    
+                    rig.setAttribute('rotation', {
+                        x: currentRot.x,
+                        y: currentRot.y - delta, // Инверсия для естественного поворота
+                        z: currentRot.z
+                    });
+                }
+            }
+        });
     </script>
 </head>
 <body>
-    <div id="overlay">
-        <h1>VR Block Builder</h1>
-        <button id="vr-btn">ВОЙТИ В VR</button>
-    </div>
-
-    <script type="module">
-        import * as THREE from 'three';
-        import { VRButton } from 'three/addons/webxr/VRButton.js';
+    <a-scene physics="driver: local; debug: false" renderer="antialias: true; colorManagement: true;">
         
-        // Cannon.js не является модулем ES, подключаем через CDN в head
-        // Добавим его динамически для надежности
-        const cannonScript = document.createElement('script');
-        cannonScript.src = "https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js";
-        document.head.appendChild(cannonScript);
+        <!-- Ассеты и Миксины (шаблоны) -->
+        <a-assets>
+            <a-mixin id="interactable"
+                     hoverable grabbable stretchable draggable droppable
+                     dynamic-body="shape: box; mass: 1; angularDamping: 0.5; linearDamping: 0.1"
+                     shadow="cast: true; receive: true">
+            </a-mixin>
+            <a-mixin id="hand-physics"
+                     sphere-collider="objects: .grabbable"
+                     static-body="shape: sphere; sphereRadius: 0.05">
+            </a-mixin>
+        </a-assets>
 
-        let scene, camera, renderer, world, blocks = [];
+        <!-- Освещение -->
+        <a-light type="directional" position="-2 4 2" intensity="0.8" castShadow="true" shadow-mapSize="1024 1024"></a-light>
+        <a-light type="ambient" intensity="0.5" color="#e2e8f0"></a-light>
 
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x101018);
+        <!-- Окружение -->
+        <a-sky color="#1a2b3c"></a-sky>
+        
+        <!-- Пол -->
+        <a-plane static-body rotation="-90 0 0" width="30" height="30" color="#2c3e50" shadow="receive: true"></a-plane>
+        
+        <!-- Декоративная сетка на полу -->
+        <a-grid src="" position="0 0.01 0" width="30" height="30"></a-grid>
 
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+        <!-- Игровой Стол / Пьедестал -->
+        <a-box static-body position="0 0.5 -1.5" width="2" height="1" depth="1" color="#34495e" shadow="cast: true; receive: true"></a-box>
+        
+        <!-- Изначальные Интерактивные Объекты на столе -->
+        <a-box class="grabbable" mixin="interactable" color="#e63946" position="-0.5 1.2 -1.5" width="0.2" height="0.2" depth="0.2"></a-box>
+        <a-box class="grabbable" mixin="interactable" color="#f4a261" position="0.5 1.2 -1.5" width="0.2" height="0.2" depth="0.2"></a-box>
+        <!-- Шарик с измененной коллизией -->
+        <a-sphere class="grabbable" 
+                  hoverable grabbable stretchable draggable droppable
+                  dynamic-body="shape: sphere; mass: 1" 
+                  color="#e9c46a" position="0 1.2 -1.5" radius="0.12" shadow="cast: true; receive: true"></a-sphere>
+
+        <!-- ИГРОК (Rig) -->
+        <a-entity id="rig" movement-controls="speed: 0.15; constrainToNavMesh: true">
             
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true;
-            document.body.appendChild(renderer.domElement);
+            <!-- Камера -->
+            <a-entity id="camera" camera position="0 1.6 0" look-controls="pointerLockEnabled: false"></a-entity>
             
-            document.body.appendChild(VRButton.createButton(renderer));
-
-            world = new CANNON.World();
-            world.gravity.set(0, -9.81, 0);
-
-            const floorGeo = new THREE.PlaneGeometry(20, 20);
-            const floorMesh = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
-            floorMesh.rotation.x = -Math.PI / 2;
-            scene.add(floorMesh);
-
-            const floorBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
-            floorBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
-            world.addBody(floorBody);
-
-            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-            const dl = new THREE.DirectionalLight(0xffffff, 1);
-            dl.position.set(5, 10, 5);
-            scene.add(dl);
-
-            for(let i=0; i<2; i++) {
-                const controller = renderer.xr.getController(i);
-                controller.addEventListener('selectstart', () => spawnCube(controller));
-                scene.add(controller);
-            }
-
-            renderer.setAnimationLoop(update);
-        }
-
-        function spawnCube(controller) {
-            const size = 0.3;
-            const geometry = new THREE.BoxGeometry(size, size, size);
-            const material = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
-            const mesh = new THREE.Mesh(geometry, material);
+            <!-- ЛЕВАЯ РУКА (Перемещение и Захват) -->
+            <a-entity hand-controls="hand: left; handModelStyle: highPoly"
+                      super-hands
+                      mixin="hand-physics">
+            </a-entity>
             
-            const pos = new THREE.Vector3();
-            controller.getWorldPosition(pos);
-            mesh.position.copy(pos);
-            scene.add(mesh);
+            <!-- ПРАВАЯ РУКА (Поворот, Лазер UI, Меню и Захват) -->
+            <a-entity hand-controls="hand: right; handModelStyle: highPoly"
+                      laser-controls="hand: right"
+                      raycaster="objects: .clickable, .grabbable; far: 5; showLine: true"
+                      super-hands
+                      mixin="hand-physics"
+                      vr-menu-controller
+                      smooth-turn>
+            </a-entity>
+        </a-entity>
 
-            const shape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
-            const body = new CANNON.Body({ mass: 1, shape: shape });
-            body.position.copy(mesh.position);
-            world.addBody(body);
+        <!-- VR UI МЕНЮ -->
+        <a-entity id="vr-menu" visible="false" position="0 1.5 -1.5">
+            <!-- Основной фон меню -->
+            <a-entity geometry="primitive: plane; width: 1.6; height: 1.3"
+                      canvas-text="text: ; bgColor: rgba(15, 23, 42, 0.9); width: 1024; height: 1024; borderRadius: 60"
+                      position="0 0 0"></a-entity>
+            
+            <!-- Заголовок -->
+            <a-entity geometry="primitive: plane; width: 1.4; height: 0.25"
+                      canvas-text="text: ИНТЕРАКТИВНОЕ МЕНЮ; fontSize: 75; color: #38bdf8"
+                      position="0 0.45 0.01"></a-entity>
 
-            blocks.push({ mesh, body });
-        }
+            <!-- Кнопка 1: Спавн объекта -->
+            <a-entity class="clickable"
+                      geometry="primitive: plane; width: 1.2; height: 0.2"
+                      canvas-text="text: Спавн объекта; fontSize: 60; bgColor: #10b981; color: #ffffff; borderRadius: 40"
+                      ui-button="action: spawn"
+                      position="0 0.15 0.02"></a-entity>
+                      
+            <!-- Кнопка 2: Очистить сцену -->
+            <a-entity class="clickable"
+                      geometry="primitive: plane; width: 1.2; height: 0.2"
+                      canvas-text="text: Очистить сцену; fontSize: 60; bgColor: #f59e0b; color: #ffffff; borderRadius: 40"
+                      ui-button="action: clear"
+                      position="0 -0.1 0.02"></a-entity>
 
-        function update() {
-            world.step(1/60);
-            blocks.forEach(b => {
-                b.mesh.position.copy(b.body.position);
-                b.mesh.quaternion.copy(b.body.quaternion);
-            });
-            renderer.render(scene, camera);
-        }
+            <!-- Кнопка 3: Закрыть -->
+            <a-entity class="clickable"
+                      geometry="primitive: plane; width: 1.2; height: 0.2"
+                      canvas-text="text: Закрыть меню; fontSize: 60; bgColor: #ef4444; color: #ffffff; borderRadius: 40"
+                      ui-button="action: close"
+                      position="0 -0.35 0.02"></a-entity>
+        </a-entity>
 
-        document.getElementById('vr-btn').addEventListener('click', () => {
-            document.getElementById('overlay').style.display = 'none';
-        });
-
-        // Задержка инициализации для загрузки Cannon.js
-        setTimeout(init, 500);
-    </script>
+    </a-scene>
 </body>
 </html>
