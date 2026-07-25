@@ -2,988 +2,314 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <title>VR Block Builder - v4.2</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VR Block Builder - v4.0</title>
     <style>
-        body {
-            margin: 0;
-            background: #000;
-            color: white;
-            font-family: sans-serif;
-            overflow: hidden;
+        body { 
+            margin: 0; 
+            background: #000; 
+            color: white; 
+            font-family: 'Inter', sans-serif; 
+            overflow: hidden; 
         }
-        #overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
+        #overlay { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: center; 
+            align-items: center; 
             z-index: 999;
-            background: rgba(0, 0, 0, 0.7);
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
         }
-        #overlay h1 {
+        h1 {
+            margin-bottom: 40px;
             font-size: 48px;
-            margin-bottom: 10px;
-            text-shadow: 0 0 20px rgba(46, 204, 113, 0.5);
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
         }
-        #overlay p {
-            font-size: 18px;
-            color: #aaa;
-            margin-bottom: 30px;
+        button { 
+            padding: 20px 50px; 
+            font-size: 28px; 
+            font-weight: bold;
+            cursor: pointer; 
+            border-radius: 15px; 
+            border: none; 
+            background: #e94560; 
+            color: white; 
+            box-shadow: 0 6px 15px rgba(233, 69, 96, 0.4);
+            transition: all 0.2s ease;
         }
-        #vr-btn {
-            padding: 30px 60px;
-            font-size: 30px;
-            cursor: pointer;
-            border-radius: 20px;
-            border: none;
-            background: #2ecc71;
-            color: white;
-            transition: transform 0.2s, box-shadow 0.2s;
-            box-shadow: 0 0 30px rgba(46, 204, 113, 0.3);
+        button:hover {
+            background: #ff5272;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(233, 69, 96, 0.6);
         }
-        #vr-btn:hover {
-            transform: scale(1.05);
-            box-shadow: 0 0 50px rgba(46, 204, 113, 0.5);
-        }
-        #vr-btn:active {
-            transform: scale(0.95);
-        }
-        #info {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            color: rgba(255, 255, 255, 0.4);
-            font-size: 14px;
-            z-index: 100;
-            pointer-events: none;
-            text-align: center;
-            background: rgba(0, 0, 0, 0.5);
-            padding: 8px 16px;
-            border-radius: 10px;
+        button:active { 
+            transform: translateY(2px) scale(0.98); 
+            box-shadow: 0 2px 10px rgba(233, 69, 96, 0.4);
         }
     </style>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js">
-    </script>
-    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js">
-    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
 </head>
 <body>
     <div id="overlay">
-        <h1>🧊 VR Block Builder</h1>
-        <p>Строй и играй с физическими кубиками в VR</p>
-        <button id="vr-btn">ВОЙТИ В VR</button>
+        <h1>VR Block Builder</h1>
+        <button id="vr-btn">ENTER VR</button>
     </div>
-    <div id="info">A (левый) — меню &nbsp;|&nbsp; Trigger — спавн &nbsp;|&nbsp; Grip — захват &nbsp;|&nbsp; B — рандом</div>
 
     <script>
-        // ============================================================
-        //  ГЛОБАЛЬНЫЕ
-        // ============================================================
-        let scene, camera, renderer, world;
-        let playerRig;
-        let leftController = null,
-            rightController = null;
-        let blocks = [];
-        let menuGroup = null;
-        let menuItems = [];
-        let hoveredItem = null;
+        let scene, camera, renderer, world, playerRig;
+        let controllers = [], blocks = [], menuGroup = null;
         let isMenuOpen = false;
-        let menuCooldown = false;
 
-        // Размеры кубов (значительно увеличены)
-        const BASE_SIZE = 0.7;
-        let selectedSize = BASE_SIZE;
-        let selectedColor = 0xff1744;
-
-        const SIZES = [
-            { id: 'small', label: 'S', value: 0.5 },
-            { id: 'medium', label: 'M', value: 0.7 },
-            { id: 'large', label: 'L', value: 1.0 },
-        ];
-
-        const COLORS = [
-            { id: 'red', hex: 0xff1744, label: 'Красный' },
-            { id: 'blue', hex: 0x2979ff, label: 'Синий' },
-            { id: 'green', hex: 0x00e676, label: 'Зелёный' },
-            { id: 'yellow', hex: 0xffea00, label: 'Жёлтый' },
-            { id: 'purple', hex: 0xd500f9, label: 'Фиолетовый' },
-            { id: 'orange', hex: 0xff9100, label: 'Оранжевый' },
-        ];
-
-        let grabbedBlock = null;
-        let grabCooldown = false;
-        let laserLine = null; // лазерный луч
-
-        // ============================================================
-        //  ИНИЦИАЛИЗАЦИЯ
-        // ============================================================
         function init() {
+            // Настройка сцены
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x101018);
-            scene.fog = new THREE.Fog(0x101018, 8, 18);
+            scene.background = new THREE.Color(0x87CEEB); // Голубое небо
+            scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
+            
+            // Настройка физического мира
+            world = new CANNON.World();
+            world.gravity.set(0, -9.81, 0); // Гравитация как на Земле
+            world.broadphase = new CANNON.NaiveBroadphase();
+            world.solver.iterations = 10;
 
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 1.6, 0);
+            // Настройка камеры и игрока
+            playerRig = new THREE.Group();
+            playerRig.position.set(0, 0, 5); // Стартовая позиция
+            scene.add(playerRig);
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
+            playerRig.add(camera);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.xr.enabled = true; // Включаем поддержку VR
             renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.2;
-            renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            world = new CANNON.World();
-            world.gravity.set(0, -9.81, 0);
-            world.broadphase = new CANNON.NaiveBroadphase();
-            world.solver.iterations = 10;
-            world.allowSleep = true;
-
-            const defaultMat = new CANNON.Material('default');
-            const floorMat = new CANNON.Material('floor');
-            const contactMat = new CANNON.ContactMaterial(defaultMat, floorMat, {
-                friction: 0.6,
-                restitution: 0.2
-            });
-            world.addContactMaterial(contactMat);
-            const contactMat2 = new CANNON.ContactMaterial(defaultMat, defaultMat, {
-                friction: 0.4,
-                restitution: 0.15
-            });
-            world.addContactMaterial(contactMat2);
-
-            playerRig = new THREE.Group();
-            playerRig.position.set(0, 0, 0);
-            scene.add(playerRig);
-            playerRig.add(camera);
-            camera.position.set(0, 1.6, 0);
-
-            // Пол
-            const floorGeo = new THREE.PlaneGeometry(40, 40);
-            const floorMat3 = new THREE.MeshStandardMaterial({
-                color: 0x222233,
-                roughness: 0.8,
-                metalness: 0.1,
-                transparent: true,
-                opacity: 0.9,
-            });
-            const floorMesh = new THREE.Mesh(floorGeo, floorMat3);
-            floorMesh.rotation.x = -Math.PI / 2;
-            floorMesh.position.y = -0.01;
-            floorMesh.receiveShadow = true;
-            scene.add(floorMesh);
-
-            const floorBody = new CANNON.Body({ mass: 0, material: floorMat });
+            // Физика пола
+            const floorBody = new CANNON.Body({ mass: 0 }); // масса 0 делает объект статичным
             floorBody.addShape(new CANNON.Plane());
-            floorBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+            floorBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
             world.addBody(floorBody);
 
-            const gridHelper = new THREE.GridHelper(40, 40, 0x444466, 0x333355);
-            gridHelper.position.y = 0.001;
-            scene.add(gridHelper);
+            // Графика пола (сетка для удобства)
+            const floorGeo = new THREE.PlaneGeometry(100, 100);
+            const floorMat = new THREE.MeshStandardMaterial({ 
+                color: 0x228B22, // Зеленый цвет (трава)
+                roughness: 0.8 
+            });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI/2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+            
+            // Добавляем сетку на пол
+            const grid = new THREE.GridHelper(100, 100, 0x000000, 0x000000);
+            grid.material.opacity = 0.2;
+            grid.material.transparent = true;
+            scene.add(grid);
 
-            // Свет
-            const ambientLight = new THREE.AmbientLight(0x404060, 0.5);
-            scene.add(ambientLight);
-            const hemiLight = new THREE.HemisphereLight(0x8888ff, 0x444422, 0.8);
-            scene.add(hemiLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
-            dirLight.position.set(5, 12, 7);
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
+            
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 20, 10);
             dirLight.castShadow = true;
-            dirLight.shadow.mapSize.width = 2048;
-            dirLight.shadow.mapSize.height = 2048;
-            dirLight.shadow.camera.near = 0.5;
-            dirLight.shadow.camera.far = 30;
-            dirLight.shadow.camera.left = -15;
-            dirLight.shadow.camera.right = 15;
-            dirLight.shadow.camera.top = 15;
-            dirLight.shadow.camera.bottom = -15;
+            dirLight.shadow.camera.top = 10;
+            dirLight.shadow.camera.bottom = -10;
+            dirLight.shadow.camera.left = -10;
+            dirLight.shadow.camera.right = 10;
             scene.add(dirLight);
-            const fillLight = new THREE.DirectionalLight(0x4444ff, 0.3);
-            fillLight.position.set(-5, 3, -5);
-            scene.add(fillLight);
 
             setupControllers();
 
-            // Лазерный луч
-            createLaser();
-
-            // Вход в VR
+            // Обработчик кнопки входа в VR
             document.getElementById('vr-btn').addEventListener('click', async () => {
                 try {
-                    const session = await navigator.xr.requestSession('immersive-vr', {
-                        optionalFeatures: ['local-floor']
+                    const session = await navigator.xr.requestSession('immersive-vr', { 
+                        optionalFeatures: ['local-floor'] 
                     });
                     await renderer.xr.setSession(session);
                     document.getElementById('overlay').style.display = 'none';
                 } catch (e) {
-                    console.error('Ошибка входа в VR:', e);
-                    alert('Не удалось войти в VR. Убедитесь, что гарнитура подключена.');
+                    console.error("VR не поддерживается или устройство не найдено", e);
+                    alert("VR не обнаружен. Убедитесь, что вы открываете ссылку в браузере шлема.");
                 }
             });
 
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
-            });
+            // Обработка изменения размера окна
+            window.addEventListener('resize', onWindowResize, false);
 
+            // Запуск главного цикла
             renderer.setAnimationLoop(animate);
         }
 
-        // ============================================================
-        //  КОНТРОЛЛЕРЫ + СОБЫТИЯ
-        // ============================================================
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
         function setupControllers() {
-            // Удаляем старые обработчики
-            if (leftController) {
-                leftController.removeEventListener('select', onLeftSelect);
-                leftController.removeEventListener('squeeze', onLeftSqueeze);
-                leftController.removeEventListener('squeezeend', onLeftSqueezeEnd);
-            }
-            if (rightController) {
-                rightController.removeEventListener('select', onRightSelect);
-                rightController.removeEventListener('squeeze', onRightSqueeze);
-                rightController.removeEventListener('squeezeend', onRightSqueezeEnd);
-            }
-
-            // Создаём заново
-            const controllers = renderer.xr.getController(0); // left
-            const controllersR = renderer.xr.getController(1); // right
-
-            leftController = controllers;
-            leftController.userData.handedness = 'left';
-            playerRig.add(leftController);
-
-            rightController = controllersR;
-            rightController.userData.handedness = 'right';
-            playerRig.add(rightController);
-
-            // Визуализация рук
-            addHandVisuals(leftController, 0x4488ff);
-            addHandVisuals(rightController, 0xff8844);
-
-            // События
-            leftController.addEventListener('select', onLeftSelect);
-            leftController.addEventListener('squeeze', onLeftSqueeze);
-            leftController.addEventListener('squeezeend', onLeftSqueezeEnd);
-
-            rightController.addEventListener('select', onRightSelect);
-            rightController.addEventListener('squeeze', onRightSqueeze);
-            rightController.addEventListener('squeezeend', onRightSqueezeEnd);
-        }
-
-        function addHandVisuals(controller, color) {
-            const group = new THREE.Group();
-            const sphere = new THREE.Mesh(
-                new THREE.SphereGeometry(0.06, 24, 24),
-                new THREE.MeshStandardMaterial({ color, roughness: 0.2, metalness: 0.8, emissive: color,
-                    emissiveIntensity: 0.3 })
-            );
-            sphere.castShadow = true;
-            group.add(sphere);
-
-            const ring = new THREE.Mesh(
-                new THREE.TorusGeometry(0.07, 0.01, 16, 32),
-                new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.5, transparent: true,
-                    opacity: 0.6 })
-            );
-            ring.rotation.x = Math.PI / 2;
-            ring.position.y = -0.01;
-            group.add(ring);
-
-            const tip = new THREE.Mesh(
-                new THREE.ConeGeometry(0.02, 0.05, 8),
-                new THREE.MeshStandardMaterial({ color: 0x88ccff, emissive: color, emissiveIntensity: 0.3 })
-            );
-            tip.position.set(0, 0, -0.06);
-            group.add(tip);
-
-            controller.add(group);
-        }
-
-        // Лазерный луч
-        function createLaser() {
-            const material = new THREE.LineBasicMaterial({ color: 0xff4444, transparent: true, opacity: 0.7 });
-            const geometry = new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, 0),
-                new THREE.Vector3(0, 0, -2)
-            ]);
-            laserLine = new THREE.Line(geometry, material);
-            laserLine.visible = false;
-            rightController.add(laserLine);
-        }
-
-        // ============================================================
-        //  ОБРАБОТЧИКИ СОБЫТИЙ
-        // ============================================================
-        function onLeftSelect() {
-            // Кнопка A — меню
-            if (!menuCooldown) {
-                menuCooldown = true;
-                buildMenu();
-                setTimeout(() => { menuCooldown = false; }, 400);
+            for(let i=0; i<2; i++) {
+                const controller = renderer.xr.getController(i);
+                playerRig.add(controller);
+                controllers.push(controller);
+                
+                // Визуализация контроллера (маленькая сфера)
+                const hand = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.05), 
+                    new THREE.MeshStandardMaterial({color: 0xffffff, wireframe: true})
+                );
+                controller.add(hand);
             }
         }
 
-        function onLeftSqueeze() {
-            tryGrab(leftController);
-        }
-
-        function onLeftSqueezeEnd() {
-            if (grabbedBlock && grabbedBlock.controller === leftController) {
-                releaseGrab();
-            }
-        }
-
-        function onRightSelect() {
-            // Trigger — спавн или выбор в меню
-            if (isMenuOpen && hoveredItem) {
-                const data = hoveredItem.userData;
-                if (data.type === 'color') {
-                    selectedColor = data.colorData.hex;
-                    // обновить подсветку выбранного цвета (можно сделать)
-                } else if (data.type === 'size') {
-                    selectedSize = data.sizeData.value;
-                    // обновить подсветку
-                    menuItems.forEach(item => {
-                        if (item.userData.type === 'size' && item.userData.glow) {
-                            const isSel = Math.abs(item.userData.sizeData.value - selectedSize) < 0.001;
-                            item.userData.glow.material.opacity = isSel ? 0.4 : 0;
-                        }
-                    });
-                } else if (data.type === 'clear') {
-                    clearAllCubes();
-                }
-                // Закрываем меню после выбора (опционально)
-                // buildMenu();
-            } else if (!isMenuOpen) {
-                if (!menuCooldown) {
-                    spawnCube(selectedColor, selectedSize);
-                    menuCooldown = true;
-                    setTimeout(() => { menuCooldown = false; }, 200);
-                }
-            }
-        }
-
-        function onRightSqueeze() {
-            tryGrab(rightController);
-        }
-
-        function onRightSqueezeEnd() {
-            if (grabbedBlock && grabbedBlock.controller === rightController) {
-                releaseGrab();
-            }
-        }
-
-        // ============================================================
-        //  МЕНЮ (УВЕЛИЧЕННОЕ)
-        // ============================================================
-        function buildMenu() {
-            if (menuGroup) {
-                // Закрыть
-                playerRig.remove(menuGroup);
-                menuGroup.traverse(child => {
-                    if (child.isMesh) {
-                        child.geometry?.dispose();
-                        if (Array.isArray(child.material)) {
-                            child.material.forEach(m => m.dispose());
-                        } else {
-                            child.material?.dispose();
-                        }
-                    }
-                });
+        function toggleMenu() {
+            if(isMenuOpen) {
+                scene.remove(menuGroup);
                 menuGroup = null;
-                menuItems = [];
-                hoveredItem = null;
                 isMenuOpen = false;
-                laserLine.visible = false;
-                return;
-            }
-
-            // Открыть
-            isMenuOpen = true;
-            laserLine.visible = true;
-
-            menuGroup = new THREE.Group();
-            menuGroup.position.set(0, 1.4, -0.9);
-
-            // Панель (увеличенная)
-            const panelW = 1.8;
-            const panelH = 1.4;
-            const panelGeo = new THREE.PlaneGeometry(panelW, panelH);
-            const panelMat = new THREE.MeshStandardMaterial({
-                color: 0x1a1a2e,
-                roughness: 0.3,
-                metalness: 0.1,
-                transparent: true,
-                opacity: 0.9,
-                side: THREE.DoubleSide,
-            });
-            const panel = new THREE.Mesh(panelGeo, panelMat);
-            panel.position.z = -0.01;
-            panel.receiveShadow = true;
-            menuGroup.add(panel);
-
-            const borderGeo = new THREE.EdgesGeometry(new THREE.PlaneGeometry(panelW, panelH));
-            const borderMat = new THREE.LineBasicMaterial({ color: 0x4444aa, transparent: true, opacity: 0.6 });
-            const border = new THREE.LineSegments(borderGeo, borderMat);
-            border.position.z = -0.005;
-            menuGroup.add(border);
-
-            // Заголовок
-            const titleCanvas = document.createElement('canvas');
-            titleCanvas.width = 512;
-            titleCanvas.height = 80;
-            const ctx = titleCanvas.getContext('2d');
-            ctx.fillStyle = 'rgba(0,0,0,0)';
-            ctx.fillRect(0, 0, 512, 80);
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.font = 'bold 48px Arial, sans-serif';
-            ctx.fillStyle = '#ffffff';
-            ctx.shadowColor = 'rgba(68,68,255,0.5)';
-            ctx.shadowBlur = 20;
-            ctx.fillText('🎨 ЦВЕТ & РАЗМЕР', 256, 44);
-            const titleTex = new THREE.CanvasTexture(titleCanvas);
-            const titleMat = new THREE.SpriteMaterial({ map: titleTex, transparent: true, depthWrite: false });
-            const titleSprite = new THREE.Sprite(titleMat);
-            titleSprite.position.set(0, 0.58, 0);
-            titleSprite.scale.set(1.0, 0.15, 1);
-            menuGroup.add(titleSprite);
-
-            // Цвета (сетка 3x2) — крупнее
-            const cols = 3,
-                rows = 2;
-            const spacingX = 0.5;
-            const spacingY = 0.45;
-            const startX = -(cols - 1) * spacingX / 2;
-            const startY = (rows - 1) * spacingY / 2 + 0.15;
-
-            COLORS.forEach((colorData, index) => {
-                const col = index % cols;
-                const row = Math.floor(index / cols);
-                const x = startX + col * spacingX;
-                const y = startY - row * spacingY;
-
-                const btnCanvas = document.createElement('canvas');
-                btnCanvas.width = 256;
-                btnCanvas.height = 256;
-                const bCtx = btnCanvas.getContext('2d');
-                const radius = 30,
-                    w = 256,
-                    h = 256;
-                bCtx.beginPath();
-                bCtx.moveTo(radius, 0);
-                bCtx.lineTo(w - radius, 0);
-                bCtx.quadraticCurveTo(w, 0, w, radius);
-                bCtx.lineTo(w, h - radius);
-                bCtx.quadraticCurveTo(w, h, w - radius, h);
-                bCtx.lineTo(radius, h);
-                bCtx.quadraticCurveTo(0, h, 0, h - radius);
-                bCtx.lineTo(0, radius);
-                bCtx.quadraticCurveTo(0, 0, radius, 0);
-                bCtx.closePath();
-                const hexStr = '#' + colorData.hex.toString(16).padStart(6, '0');
-                const grad = bCtx.createLinearGradient(0, 0, w, h);
-                grad.addColorStop(0, hexStr);
-                grad.addColorStop(1, hexStr + '88');
-                bCtx.fillStyle = grad;
-                bCtx.fill();
-                bCtx.strokeStyle = 'rgba(255,255,255,0.3)';
-                bCtx.lineWidth = 4;
-                bCtx.stroke();
-                bCtx.textAlign = 'center';
-                bCtx.textBaseline = 'middle';
-                bCtx.font = 'bold 40px Arial, sans-serif';
-                bCtx.fillStyle = '#ffffff';
-                bCtx.shadowColor = 'rgba(0,0,0,0.8)';
-                bCtx.shadowBlur = 10;
-                bCtx.fillText(colorData.label, 128, 128);
-                bCtx.shadowBlur = 0;
-                bCtx.fillStyle = hexStr;
-                bCtx.fillRect(10, 10, 30, 30);
-                bCtx.strokeStyle = 'rgba(255,255,255,0.2)';
-                bCtx.lineWidth = 2;
-                bCtx.strokeRect(10, 10, 30, 30);
-
-                const btnTex = new THREE.CanvasTexture(btnCanvas);
-                btnTex.needsUpdate = true;
-                const btnMat3 = new THREE.MeshStandardMaterial({
-                    map: btnTex,
-                    roughness: 0.4,
-                    metalness: 0.2,
-                    transparent: true,
-                    side: THREE.DoubleSide,
-                });
-                const btnGeo = new THREE.PlaneGeometry(0.4, 0.4);
-                const btnMesh = new THREE.Mesh(btnGeo, btnMat3);
-                btnMesh.position.set(x, y, 0);
-                btnMesh.userData.colorData = colorData;
-                btnMesh.userData.isMenuItem = true;
-                btnMesh.userData.type = 'color';
-                btnMesh.castShadow = true;
-                menuGroup.add(btnMesh);
-                menuItems.push(btnMesh);
-
-                const glowGeo = new THREE.PlaneGeometry(0.44, 0.44);
-                const glowMat = new THREE.MeshBasicMaterial({
-                    color: 0xffffff,
-                    transparent: true,
-                    opacity: 0,
-                    side: THREE.DoubleSide,
-                    depthWrite: false,
-                });
-                const glow = new THREE.Mesh(glowGeo, glowMat);
-                glow.position.set(x, y, 0.001);
-                glow.userData.parentBtn = btnMesh;
-                menuGroup.add(glow);
-                btnMesh.userData.glow = glow;
-            });
-
-            // Размеры (ряд снизу) — крупнее
-            const sizeStartY = -0.35;
-            const sizeSpacing = 0.4;
-            const sizeStartX = -(SIZES.length - 1) * sizeSpacing / 2;
-
-            SIZES.forEach((sizeData, idx) => {
-                const x = sizeStartX + idx * sizeSpacing;
-                const y = sizeStartY;
-
-                const btnCanvas = document.createElement('canvas');
-                btnCanvas.width = 128;
-                btnCanvas.height = 128;
-                const bCtx = btnCanvas.getContext('2d');
-                const radius = 20,
-                    w = 128,
-                    h = 128;
-                bCtx.beginPath();
-                bCtx.moveTo(radius, 0);
-                bCtx.lineTo(w - radius, 0);
-                bCtx.quadraticCurveTo(w, 0, w, radius);
-                bCtx.lineTo(w, h - radius);
-                bCtx.quadraticCurveTo(w, h, w - radius, h);
-                bCtx.lineTo(radius, h);
-                bCtx.quadraticCurveTo(0, h, 0, h - radius);
-                bCtx.lineTo(0, radius);
-                bCtx.quadraticCurveTo(0, 0, radius, 0);
-                bCtx.closePath();
-                const isSelected = Math.abs(sizeData.value - selectedSize) < 0.001;
-                bCtx.fillStyle = isSelected ? '#4a4aff' : '#2a2a4a';
-                bCtx.fill();
-                bCtx.strokeStyle = isSelected ? '#88aaff' : '#445566';
-                bCtx.lineWidth = 3;
-                bCtx.stroke();
-                bCtx.textAlign = 'center';
-                bCtx.textBaseline = 'middle';
-                bCtx.font = 'bold 56px Arial, sans-serif';
-                bCtx.fillStyle = '#ffffff';
-                bCtx.shadowColor = 'rgba(0,0,0,0.8)';
-                bCtx.shadowBlur = 10;
-                bCtx.fillText(sizeData.label, 64, 64);
-
-                const btnTex = new THREE.CanvasTexture(btnCanvas);
-                btnTex.needsUpdate = true;
-                const btnMat3 = new THREE.MeshStandardMaterial({
-                    map: btnTex,
-                    roughness: 0.4,
-                    metalness: 0.2,
-                    transparent: true,
-                    side: THREE.DoubleSide,
-                });
-                const btnGeo = new THREE.PlaneGeometry(0.3, 0.3);
-                const btnMesh = new THREE.Mesh(btnGeo, btnMat3);
-                btnMesh.position.set(x, y, 0);
-                btnMesh.userData.sizeData = sizeData;
-                btnMesh.userData.isMenuItem = true;
-                btnMesh.userData.type = 'size';
-                btnMesh.castShadow = true;
-                menuGroup.add(btnMesh);
-                menuItems.push(btnMesh);
-
-                const glowGeo = new THREE.PlaneGeometry(0.34, 0.34);
-                const glowMat = new THREE.MeshBasicMaterial({
-                    color: 0x88ddff,
-                    transparent: true,
-                    opacity: isSelected ? 0.4 : 0,
-                    side: THREE.DoubleSide,
-                    depthWrite: false,
-                });
-                const glow = new THREE.Mesh(glowGeo, glowMat);
-                glow.position.set(x, y, 0.001);
-                glow.userData.parentBtn = btnMesh;
-                menuGroup.add(glow);
-                btnMesh.userData.glow = glow;
-            });
-
-            // Очистить (крупнее)
-            const clearData = { id: 'clear', label: '🗑️ Очистить' };
-            const cCanvas = document.createElement('canvas');
-            cCanvas.width = 512;
-            cCanvas.height = 128;
-            const cCtx = cCanvas.getContext('2d');
-            const cRadius = 30,
-                cw = 512,
-                ch = 128;
-            cCtx.beginPath();
-            cCtx.moveTo(cRadius, 0);
-            cCtx.lineTo(cw - cRadius, 0);
-            cCtx.quadraticCurveTo(cw, 0, cw, cRadius);
-            cCtx.lineTo(cw, ch - cRadius);
-            cCtx.quadraticCurveTo(cw, ch, cw - cRadius, ch);
-            cCtx.lineTo(cRadius, ch);
-            cCtx.quadraticCurveTo(0, ch, 0, ch - cRadius);
-            cCtx.lineTo(0, cRadius);
-            cCtx.quadraticCurveTo(0, 0, cRadius, 0);
-            cCtx.closePath();
-            cCtx.fillStyle = '#222244';
-            cCtx.fill();
-            cCtx.strokeStyle = 'rgba(255,100,100,0.3)';
-            cCtx.lineWidth = 4;
-            cCtx.stroke();
-            cCtx.textAlign = 'center';
-            cCtx.textBaseline = 'middle';
-            cCtx.font = 'bold 48px Arial, sans-serif';
-            cCtx.fillStyle = '#ff6666';
-            cCtx.shadowColor = 'rgba(255,0,0,0.3)';
-            cCtx.shadowBlur = 20;
-            cCtx.fillText('🗑️ ОЧИСТИТЬ ВСЁ', 256, 64);
-            const clearTex = new THREE.CanvasTexture(cCanvas);
-            const clearMat = new THREE.MeshStandardMaterial({
-                map: clearTex,
-                roughness: 0.5,
-                metalness: 0.1,
-                transparent: true,
-                side: THREE.DoubleSide,
-            });
-            const clearGeo = new THREE.PlaneGeometry(0.9, 0.25);
-            const clearMesh = new THREE.Mesh(clearGeo, clearMat);
-            clearMesh.position.set(0, -0.6, 0);
-            clearMesh.userData.colorData = clearData;
-            clearMesh.userData.isMenuItem = true;
-            clearMesh.userData.type = 'clear';
-            clearMesh.castShadow = true;
-            menuGroup.add(clearMesh);
-            menuItems.push(clearMesh);
-
-            const cGlowGeo = new THREE.PlaneGeometry(0.94, 0.28);
-            const cGlowMat = new THREE.MeshBasicMaterial({
-                color: 0xff4444,
-                transparent: true,
-                opacity: 0,
-                side: THREE.DoubleSide,
-                depthWrite: false,
-            });
-            const cGlow = new THREE.Mesh(cGlowGeo, cGlowMat);
-            cGlow.position.set(0, -0.6, 0.001);
-            cGlow.userData.parentBtn = clearMesh;
-            menuGroup.add(cGlow);
-            clearMesh.userData.glow = cGlow;
-
-            playerRig.add(menuGroup);
-            hoveredItem = null;
-
-            // Анимация появления
-            menuGroup.scale.set(0.01, 0.01, 0.01);
-            let scale = 0.01;
-            const targetScale = 1;
-            const animStep = () => {
-                scale += (targetScale - scale) * 0.12;
-                if (Math.abs(scale - targetScale) > 0.001) {
-                    menuGroup.scale.set(scale, scale, scale);
-                    requestAnimationFrame(animStep);
-                } else {
-                    menuGroup.scale.set(targetScale, targetScale, targetScale);
-                }
-            };
-            animStep();
-        }
-
-        // ============================================================
-        //  СПАВН (увеличенные кубы)
-        // ============================================================
-        function spawnCube(colorHex, size, position) {
-            if (!position) {
-                if (rightController) {
-                    const pos = new THREE.Vector3();
-                    rightController.getWorldPosition(pos);
-                    const dir = new THREE.Vector3(0, 0, -1);
-                    dir.applyQuaternion(rightController.quaternion);
-                    position = pos.clone().add(dir.multiplyScalar(0.6));
-                    position.y += 0.15;
-                } else {
-                    const pos = new THREE.Vector3(0, 1.5, -1);
-                    pos.applyMatrix4(camera.matrixWorld);
-                    position = pos;
-                }
-            }
-
-            const s = size || selectedSize;
-            const half = s / 2;
-
-            const colorObj = new THREE.Color(colorHex);
-            const hsl = {};
-            colorObj.getHSL(hsl);
-            const variation = (Math.random() - 0.5) * 0.08;
-            const finalColor = new THREE.Color().setHSL(
-                Math.max(0, Math.min(1, hsl.h + variation * 0.5)),
-                Math.min(1, Math.max(0.3, hsl.s + variation)),
-                Math.min(1, Math.max(0.4, hsl.l + variation * 0.3))
-            );
-
-            const geo = new THREE.BoxGeometry(s, s, s);
-            const mat = new THREE.MeshStandardMaterial({
-                color: finalColor,
-                roughness: 0.3 + Math.random() * 0.2,
-                metalness: 0.1 + Math.random() * 0.3,
-                emissive: finalColor,
-                emissiveIntensity: 0.08,
-            });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            mesh.position.copy(position);
-            scene.add(mesh);
-
-            const body = new CANNON.Body({
-                mass: 0.5 + Math.random() * 0.5,
-                shape: new CANNON.Box(new CANNON.Vec3(half, half, half)),
-                material: new CANNON.Material('default'),
-            });
-            body.position.set(position.x, position.y, position.z);
-            body.quaternion.setFromEuler(
-                (Math.random() - 0.5) * 0.5,
-                (Math.random() - 0.5) * 0.5,
-                (Math.random() - 0.5) * 0.5
-            );
-            world.addBody(body);
-
-            const entry = { mesh, body, color: finalColor.getHex(), size: s };
-            blocks.push(entry);
-
-            // Анимация появления
-            mesh.scale.set(0.01, 0.01, 0.01);
-            let sc = 0.01;
-            const targetS = 1;
-            const pulse = () => {
-                sc += (targetS - sc) * 0.15;
-                if (Math.abs(sc - targetS) > 0.001) {
-                    mesh.scale.set(sc, sc, sc);
-                    requestAnimationFrame(pulse);
-                } else {
-                    mesh.scale.set(targetS, targetS, targetS);
-                }
-            };
-            pulse();
-
-            return entry;
-        }
-
-        // ============================================================
-        //  ОЧИСТКА
-        // ============================================================
-        function clearAllCubes() {
-            blocks.forEach(entry => {
-                scene.remove(entry.mesh);
-                world.remove(entry.body);
-                entry.mesh.geometry?.dispose();
-                if (Array.isArray(entry.mesh.material)) {
-                    entry.mesh.material.forEach(m => m.dispose());
-                } else {
-                    entry.mesh.material?.dispose();
-                }
-            });
-            blocks = [];
-        }
-
-        // ============================================================
-        //  ЗАХВАТ И ТОЛКАНИЕ
-        // ============================================================
-        function tryGrab(controller) {
-            if (grabbedBlock || grabCooldown) return;
-            if (!controller) return;
-
-            const origin = new THREE.Vector3();
-            controller.getWorldPosition(origin);
-            const dir = new THREE.Vector3(0, 0, -1);
-            dir.applyQuaternion(controller.quaternion);
-
-            const raycaster = new THREE.Raycaster(origin, dir, 0.05, 2.0);
-            const meshes = blocks.map(b => b.mesh);
-            const intersects = raycaster.intersectObjects(meshes);
-
-            if (intersects.length > 0) {
-                const hitMesh = intersects[0].object;
-                const entry = blocks.find(b => b.mesh === hitMesh);
-                if (entry) {
-                    // Захват
-                    grabbedBlock = {
-                        entry: entry,
-                        controller: controller,
-                        offset: new THREE.Vector3().copy(entry.mesh.position).sub(origin),
-                    };
-                    entry.body.type = CANNON.Body.STATIC;
-                    entry.body.mass = 0;
-                    entry.body.updateMassProperties();
-                    grabCooldown = true;
-                    setTimeout(() => { grabCooldown = false; }, 100);
-                }
             } else {
-                // Если не попали в куб, но хотим толкнуть — можно применить импульс к ближайшему
-                // Но для простоты оставим только захват
+                menuGroup = new THREE.Group();
+                
+                // Панель меню
+                const panel = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.4, 0.3, 0.02), 
+                    new THREE.MeshStandardMaterial({color: 0x333333})
+                );
+                panel.position.set(0, 1.5, -0.6); // Позиция перед игроком
+                menuGroup.add(panel);
+
+                // Декоративная кнопка на панели
+                const btn = new THREE.Mesh(
+                    new THREE.BoxGeometry(0.2, 0.1, 0.04), 
+                    new THREE.MeshStandardMaterial({color: 0xe94560})
+                );
+                btn.position.set(0, 1.5, -0.58);
+                menuGroup.add(btn);
+                
+                playerRig.add(menuGroup); // Привязываем к игроку
+                isMenuOpen = true;
             }
         }
 
-        function releaseGrab() {
-            if (grabbedBlock) {
-                const entry = grabbedBlock.entry;
-                entry.body.type = CANNON.Body.DYNAMIC;
-                entry.body.mass = 0.5 + Math.random() * 0.5;
-                entry.body.updateMassProperties();
-                // Небольшая скорость при отпускании, чтобы куб не падал вертикально
-                entry.body.velocity.set(0, 0, 0);
-                entry.body.angularVelocity.set(0, 0, 0);
-                grabbedBlock = null;
-            }
+        function spawnBlock(controller) {
+            const size = 0.2; // Размер кубика
+            
+            // Случайный цвет для кубика
+            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
+            const randomColor = colors[Math.floor(Math.random() * colors.length)];
+            
+            // Графический объект
+            const blockGeo = new THREE.BoxGeometry(size, size, size);
+            const blockMat = new THREE.MeshStandardMaterial({ color: randomColor });
+            const block = new THREE.Mesh(blockGeo, blockMat);
+            block.castShadow = true;
+            block.receiveShadow = true;
+            
+            // Позиция спавна - немного впереди контроллера
+            const spawnPos = new THREE.Vector3(0, 0, -0.2).applyMatrix4(controller.matrixWorld);
+            scene.add(block);
+            
+            // Физический объект
+            const body = new CANNON.Body({mass: 2}); // Масса 2 кг
+            body.addShape(new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2)));
+            body.position.set(spawnPos.x, spawnPos.y, spawnPos.z);
+            
+            // Придаем небольшой импульс вперед
+            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
+            body.velocity.set(direction.x * 2, direction.y * 2, direction.z * 2);
+            
+            world.addBody(body);
+            
+            // Сохраняем связку графики и физики
+            blocks.push({mesh: block, body: body});
         }
 
-        function updateGrab() {
-            if (!grabbedBlock) return;
-            const { entry, controller, offset } = grabbedBlock;
-            const origin = new THREE.Vector3();
-            controller.getWorldPosition(origin);
-            const targetPos = origin.clone().add(offset);
-            const dir = new THREE.Vector3(0, 0, -1);
-            dir.applyQuaternion(controller.quaternion);
-            targetPos.add(dir.multiplyScalar(0.1));
-
-            entry.body.position.copy(targetPos);
-            entry.body.quaternion.copy(controller.quaternion);
-            entry.mesh.position.copy(entry.body.position);
-            entry.mesh.quaternion.copy(entry.body.quaternion);
-        }
-
-        // ============================================================
-        //  МЕНЮ RAYCASTER (подсветка) и ЛАЗЕР
-        // ============================================================
-        function updateMenuInteraction() {
-            if (!isMenuOpen || !menuGroup || !rightController) {
-                // Если меню закрыто, скрываем лазер
-                if (laserLine) laserLine.visible = false;
-                return;
-            }
-
-            // Показываем лазер
-            laserLine.visible = true;
-
-            // Обновляем луч: направление от правого контроллера
-            const origin = new THREE.Vector3();
-            rightController.getWorldPosition(origin);
-            const dir = new THREE.Vector3(0, 0, -1);
-            dir.applyQuaternion(rightController.quaternion);
-            const end = origin.clone().add(dir.multiplyScalar(3));
-
-            // Обновляем геометрию луча
-            const points = [origin, end];
-            laserLine.geometry.dispose();
-            laserLine.geometry = new THREE.BufferGeometry().setFromPoints(points);
-
-            // Raycaster для меню
-            const raycaster = new THREE.Raycaster(origin, dir, 0.01, 3.0);
-            const intersects = raycaster.intersectObjects(menuItems);
-
-            menuItems.forEach(item => {
-                if (item.userData.glow) {
-                    item.userData.glow.material.opacity = 0;
-                }
-                item.scale.set(1, 1, 1);
-            });
-            hoveredItem = null;
-
-            if (intersects.length > 0) {
-                const hit = intersects[0].object;
-                if (hit.userData.isMenuItem) {
-                    hoveredItem = hit;
-                    if (hit.userData.glow) {
-                        const isClear = hit.userData.type === 'clear';
-                        hit.userData.glow.material.color.set(isClear ? 0xff4444 : 0x88ddff);
-                        hit.userData.glow.material.opacity = 0.6;
-                    }
-                    hit.scale.set(1.08, 1.08, 1.08);
-                }
-            }
-        }
-
-        // ============================================================
-        //  ОСНОВНОЙ ЦИКЛ (движение, поворот, физика)
-        // ============================================================
         function animate() {
-            // --- Физика ---
-            world.step(1 / 60, 1 / 60, 3);
-
-            // Синхронизация
-            blocks.forEach(entry => {
-                entry.mesh.position.copy(entry.body.position);
-                entry.mesh.quaternion.copy(entry.body.quaternion);
-            });
-
-            // Обновление захвата
-            updateGrab();
-
-            // --- Обработка осей (движение и поворот) ---
+            // Шаг физического движка
+            world.step(1/60);
+            
             const session = renderer.xr.getSession();
             if (session) {
-                session.inputSources.forEach(source => {
-                    if (!source.gamepad) return;
-                    const gamepad = source.gamepad;
-                    const handedness = source.handedness;
+                // Обработка ввода с контроллеров
+                session.inputSources.forEach((source, index) => {
+                    if (source.gamepad) {
+                        const axes = source.gamepad.axes;
+                        const buttons = source.gamepad.buttons;
+                        const controller = controllers[index];
 
-                    // Левая рука: движение
-                    if (handedness === 'left') {
-                        const axes = gamepad.axes;
-                        if (axes.length >= 4) {
-                            const forward = new THREE.Vector3(0, 0, -1);
-                            forward.applyQuaternion(playerRig.quaternion);
-                            const moveZ = -axes[3] * 0.08;
-                            const moveX = axes[2] * 0.08;
-                            playerRig.position.x += forward.x * moveZ + new THREE.Vector3(1, 0, 0).applyQuaternion(
-                                playerRig.quaternion).x * moveX;
-                            playerRig.position.z += forward.z * moveZ + new THREE.Vector3(1, 0, 0).applyQuaternion(
-                                playerRig.quaternion).z * moveX;
+                        // Кнопка Y/B (обычно индекс 5 или 4) для открытия меню
+                        if (source.handedness === 'right' && buttons[4]?.pressed && !window.menuCooldown) {
+                            toggleMenu();
+                            window.menuCooldown = true;
+                            setTimeout(() => window.menuCooldown = false, 500);
                         }
-                    }
+                        
+                        // Триггер (индекс 0) для спавна блока
+                        if (buttons[0]?.pressed && !window[`triggerCooldown${index}`]) {
+                            spawnBlock(controller);
+                            window[`triggerCooldown${index}`] = true;
+                            setTimeout(() => window[`triggerCooldown${index}`] = false, 300); // Кулдаун 0.3 сек
+                        }
 
-                    // Правая рука: поворот
-                    if (handedness === 'right') {
-                        const axes = gamepad.axes;
-                        if (axes.length >= 4) {
-                            playerRig.rotation.y -= axes[2] * 0.04;
+                        // Плавное перемещение на левый стик
+                        if (source.handedness === 'left') {
+                            const moveSpeed = 0.05;
+                            
+                            // Получаем вектор направления взгляда игрока (камеры)
+                            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+                            forward.y = 0; // Запрещаем летать
+                            forward.normalize();
+                            
+                            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+                            right.y = 0;
+                            right.normalize();
+                            
+                            // axes[3] - вперед/назад, axes[2] - влево/вправо
+                            if (Math.abs(axes[3]) > 0.1) {
+                                playerRig.position.add(forward.multiplyScalar(-axes[3] * moveSpeed));
+                            }
+                            if (Math.abs(axes[2]) > 0.1) {
+                                playerRig.position.add(right.multiplyScalar(axes[2] * moveSpeed));
+                            }
+                        } 
+                        // Snap-turn (резкий поворот) на правый стик, чтобы не тошнило
+                        else if (source.handedness === 'right') {
+                            if (Math.abs(axes[2]) > 0.5 && !window.rotateCooldown) {
+                                // Поворот на 45 градусов (PI/4)
+                                playerRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
+                                window.rotateCooldown = true;
+                                setTimeout(() => window.rotateCooldown = false, 500);
+                            }
                         }
                     }
                 });
             }
 
-            // --- Обновление меню и лазера ---
-            updateMenuInteraction();
+            blocks.forEach(b => {
+                b.mesh.position.copy(b.body.position);
+                b.mesh.quaternion.copy(b.body.quaternion);
+                
+                // Ограничение: если блок упал слишком низко, удаляем его, чтобы не тормозило
+                if (b.body.position.y < -10) {
+                    scene.remove(b.mesh);
+                    world.remove(b.body);
+                }
+            });
 
-            // --- Рендер ---
+            // Рендер кадра
             renderer.render(scene, camera);
         }
 
-        // ============================================================
-        //  ЗАПУСК
-        // ============================================================
+        // Запуск
         init();
-        console.log('🧊 VR Block Builder v4.2');
-        console.log('🎮 A (левый) — меню | Trigger — спавн | Grip — захват | B — рандом');
-        console.log('🚶 Левый стик — ходьба | Правый стик — поворот');
     </script>
 </body>
 </html>
