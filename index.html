@@ -3,95 +3,96 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>VR Block Builder - FIXED</title>
+    <title>VR Block Builder - Stable</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
         #overlay { 
             position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
             display: flex; flex-direction: column; justify-content: center; align-items: center; 
-            background: #111; color: white; z-index: 100; 
+            z-index: 999; background: #000; 
         }
+        #vr-btn { padding: 20px 40px; font-size: 24px; cursor: pointer; background: #2ecc71; border: none; color: white; border-radius: 10px; }
     </style>
-    <!-- Three.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
-    <!-- Cannon.js -->
-    <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
-    <!-- VRButton ADDON (Обязательно для работы кнопки) -->
-    <script src="https://unpkg.com/three@0.134.0/examples/js/webxr/VRButton.js"></script>
+    <!-- Подключаем Three.js и Cannon.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.134.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.134.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
     <div id="overlay">
-        <h1 style="color:#e94560">VR Block Builder</h1>
-        <p>Используйте контроллеры для взаимодействия</p>
-        <div id="vr-container"></div>
+        <h1>VR Block Builder</h1>
+        <button id="vr-btn">ВОЙТИ В VR</button>
     </div>
 
-    <script>
-        let scene, camera, renderer, world, clock;
-        let blocks = [];
-        let controllers = [];
+    <script type="module">
+        import * as THREE from 'three';
+        import { VRButton } from 'three/addons/webxr/VRButton.js';
+        
+        // Cannon.js не является модулем ES, подключаем через CDN в head
+        // Добавим его динамически для надежности
+        const cannonScript = document.createElement('script');
+        cannonScript.src = "https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js";
+        document.head.appendChild(cannonScript);
+
+        let scene, camera, renderer, world, blocks = [];
 
         function init() {
-            // 1. Инициализация Three.js
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x202025);
-            clock = new THREE.Clock();
+            scene.background = new THREE.Color(0x101018);
 
-            // 2. Physics World
-            world = new CANNON.World();
-            world.gravity.set(0, -9.81, 0);
-
-            // 3. Camera
             camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 1.6, 2);
-
-            // 4. Renderer
+            
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
-
-            // 5. ИСПРАВЛЕНИЕ: Используем VRButton из подключенного скрипта
+            
             document.body.appendChild(VRButton.createButton(renderer));
 
-            // 6. Lighting
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const dl = new THREE.DirectionalLight(0xffffff, 1);
-            dl.position.set(5, 10, 5);
-            scene.add(dl);
+            world = new CANNON.World();
+            world.gravity.set(0, -9.81, 0);
 
-            // 7. Floor
             const floorGeo = new THREE.PlaneGeometry(20, 20);
-            const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
-            floor.rotation.x = -Math.PI / 2;
-            scene.add(floor);
+            const floorMesh = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0x333333 }));
+            floorMesh.rotation.x = -Math.PI / 2;
+            scene.add(floorMesh);
 
             const floorBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
             floorBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
             world.addBody(floorBody);
 
-            // 8. Controllers
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const dl = new THREE.DirectionalLight(0xffffff, 1);
+            dl.position.set(5, 10, 5);
+            scene.add(dl);
+
             for(let i=0; i<2; i++) {
                 const controller = renderer.xr.getController(i);
-                controller.addEventListener('selectstart', onSelectStart);
+                controller.addEventListener('selectstart', () => spawnCube(controller));
                 scene.add(controller);
-                controllers.push(controller);
             }
 
             renderer.setAnimationLoop(update);
         }
 
-        function onSelectStart() {
-            const size = 0.2;
-            const geo = new THREE.BoxGeometry(size, size, size);
-            const mat = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
-            const mesh = new THREE.Mesh(geo, mat);
+        function spawnCube(controller) {
+            const size = 0.3;
+            const geometry = new THREE.BoxGeometry(size, size, size);
+            const material = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geometry, material);
             
-            mesh.position.copy(this.position);
+            const pos = new THREE.Vector3();
+            controller.getWorldPosition(pos);
+            mesh.position.copy(pos);
             scene.add(mesh);
 
-            const body = new CANNON.Body({ mass: 1, shape: new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2)) });
+            const shape = new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2));
+            const body = new CANNON.Body({ mass: 1, shape: shape });
             body.position.copy(mesh.position);
             world.addBody(body);
 
@@ -100,16 +101,19 @@
 
         function update() {
             world.step(1/60);
-
             blocks.forEach(b => {
                 b.mesh.position.copy(b.body.position);
                 b.mesh.quaternion.copy(b.body.quaternion);
             });
-
             renderer.render(scene, camera);
         }
 
-        init();
+        document.getElementById('vr-btn').addEventListener('click', () => {
+            document.getElementById('overlay').style.display = 'none';
+        });
+
+        // Задержка инициализации для загрузки Cannon.js
+        setTimeout(init, 500);
     </script>
 </body>
 </html>
