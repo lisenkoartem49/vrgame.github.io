@@ -2,313 +2,113 @@
 <html lang="ru">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VR Block Builder - v4.0</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VR Block Builder - FIXED</title>
     <style>
-        body { 
-            margin: 0; 
-            background: #000; 
-            color: white; 
-            font-family: 'Inter', sans-serif; 
-            overflow: hidden; 
-        }
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; }
         #overlay { 
-            position: absolute; 
-            top: 0; 
-            left: 0; 
-            width: 100%; 
-            height: 100%; 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: center; 
-            align-items: center; 
-            z-index: 999;
-            background: linear-gradient(135deg, #1a1a2e, #16213e);
-        }
-        h1 {
-            margin-bottom: 40px;
-            font-size: 48px;
-            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
-        }
-        button { 
-            padding: 20px 50px; 
-            font-size: 28px; 
-            font-weight: bold;
-            cursor: pointer; 
-            border-radius: 15px; 
-            border: none; 
-            background: #e94560; 
-            color: white; 
-            box-shadow: 0 6px 15px rgba(233, 69, 96, 0.4);
-            transition: all 0.2s ease;
-        }
-        button:hover {
-            background: #ff5272;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(233, 69, 96, 0.6);
-        }
-        button:active { 
-            transform: translateY(2px) scale(0.98); 
-            box-shadow: 0 2px 10px rgba(233, 69, 96, 0.4);
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; 
+            display: flex; flex-direction: column; justify-content: center; align-items: center; 
+            background: #111; color: white; z-index: 100; 
         }
     </style>
+    <!-- Three.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r134/three.min.js"></script>
+    <!-- Cannon.js -->
     <script src="https://cdn.jsdelivr.net/npm/cannon@0.6.2/build/cannon.min.js"></script>
+    <!-- VRButton ADDON (Обязательно для работы кнопки) -->
+    <script src="https://unpkg.com/three@0.134.0/examples/js/webxr/VRButton.js"></script>
 </head>
 <body>
     <div id="overlay">
-        <h1>VR Block Builder</h1>
-        <button id="vr-btn">ENTER VR</button>
+        <h1 style="color:#e94560">VR Block Builder</h1>
+        <p>Используйте контроллеры для взаимодействия</p>
+        <div id="vr-container"></div>
     </div>
 
     <script>
-        let scene, camera, renderer, world, playerRig;
-        let controllers = [], blocks = [], menuGroup = null;
-        let isMenuOpen = false;
+        let scene, camera, renderer, world, clock;
+        let blocks = [];
+        let controllers = [];
 
         function init() {
-            // Настройка сцены
+            // 1. Инициализация Three.js
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x87CEEB); // Голубое небо
-            scene.fog = new THREE.Fog(0x87CEEB, 10, 50);
-            
-            // Настройка физического мира
+            scene.background = new THREE.Color(0x202025);
+            clock = new THREE.Clock();
+
+            // 2. Physics World
             world = new CANNON.World();
-            world.gravity.set(0, -9.81, 0); // Гравитация как на Земле
-            world.broadphase = new CANNON.NaiveBroadphase();
-            world.solver.iterations = 10;
+            world.gravity.set(0, -9.81, 0);
 
-            // Настройка камеры и игрока
-            playerRig = new THREE.Group();
-            playerRig.position.set(0, 0, 5); // Стартовая позиция
-            scene.add(playerRig);
-
+            // 3. Camera
             camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1000);
-            playerRig.add(camera);
+            camera.position.set(0, 1.6, 2);
 
+            // 4. Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.xr.enabled = true; // Включаем поддержку VR
-            renderer.shadowMap.enabled = true;
+            renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            // Физика пола
-            const floorBody = new CANNON.Body({ mass: 0 }); // масса 0 делает объект статичным
-            floorBody.addShape(new CANNON.Plane());
+            // 5. ИСПРАВЛЕНИЕ: Используем VRButton из подключенного скрипта
+            document.body.appendChild(VRButton.createButton(renderer));
+
+            // 6. Lighting
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dl = new THREE.DirectionalLight(0xffffff, 1);
+            dl.position.set(5, 10, 5);
+            scene.add(dl);
+
+            // 7. Floor
+            const floorGeo = new THREE.PlaneGeometry(20, 20);
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+            const floor = new THREE.Mesh(floorGeo, floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            scene.add(floor);
+
+            const floorBody = new CANNON.Body({ mass: 0, shape: new CANNON.Plane() });
             floorBody.quaternion.setFromEuler(-Math.PI/2, 0, 0);
             world.addBody(floorBody);
 
-            // Графика пола (сетка для удобства)
-            const floorGeo = new THREE.PlaneGeometry(100, 100);
-            const floorMat = new THREE.MeshStandardMaterial({ 
-                color: 0x228B22, // Зеленый цвет (трава)
-                roughness: 0.8 
-            });
-            const floor = new THREE.Mesh(floorGeo, floorMat);
-            floor.rotation.x = -Math.PI/2;
-            floor.receiveShadow = true;
-            scene.add(floor);
-            
-            // Добавляем сетку на пол
-            const grid = new THREE.GridHelper(100, 100, 0x000000, 0x000000);
-            grid.material.opacity = 0.2;
-            grid.material.transparent = true;
-            scene.add(grid);
-
-            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.6));
-            
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(10, 20, 10);
-            dirLight.castShadow = true;
-            dirLight.shadow.camera.top = 10;
-            dirLight.shadow.camera.bottom = -10;
-            dirLight.shadow.camera.left = -10;
-            dirLight.shadow.camera.right = 10;
-            scene.add(dirLight);
-
-            setupControllers();
-
-            // Обработчик кнопки входа в VR
-            document.getElementById('vr-btn').addEventListener('click', async () => {
-                try {
-                    const session = await navigator.xr.requestSession('immersive-vr', { 
-                        optionalFeatures: ['local-floor'] 
-                    });
-                    await renderer.xr.setSession(session);
-                    document.getElementById('overlay').style.display = 'none';
-                } catch (e) {
-                    console.error("VR не поддерживается или устройство не найдено", e);
-                    alert("VR не обнаружен. Убедитесь, что вы открываете ссылку в браузере шлема.");
-                }
-            });
-
-            // Обработка изменения размера окна
-            window.addEventListener('resize', onWindowResize, false);
-
-            // Запуск главного цикла
-            renderer.setAnimationLoop(animate);
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
-        }
-
-        function setupControllers() {
+            // 8. Controllers
             for(let i=0; i<2; i++) {
                 const controller = renderer.xr.getController(i);
-                playerRig.add(controller);
+                controller.addEventListener('selectstart', onSelectStart);
+                scene.add(controller);
                 controllers.push(controller);
-                
-                // Визуализация контроллера (маленькая сфера)
-                const hand = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.05), 
-                    new THREE.MeshStandardMaterial({color: 0xffffff, wireframe: true})
-                );
-                controller.add(hand);
             }
+
+            renderer.setAnimationLoop(update);
         }
 
-        function toggleMenu() {
-            if(isMenuOpen) {
-                scene.remove(menuGroup);
-                menuGroup = null;
-                isMenuOpen = false;
-            } else {
-                menuGroup = new THREE.Group();
-                
-                // Панель меню
-                const panel = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.4, 0.3, 0.02), 
-                    new THREE.MeshStandardMaterial({color: 0x333333})
-                );
-                panel.position.set(0, 1.5, -0.6); // Позиция перед игроком
-                menuGroup.add(panel);
+        function onSelectStart() {
+            const size = 0.2;
+            const geo = new THREE.BoxGeometry(size, size, size);
+            const mat = new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff });
+            const mesh = new THREE.Mesh(geo, mat);
+            
+            mesh.position.copy(this.position);
+            scene.add(mesh);
 
-                // Декоративная кнопка на панели
-                const btn = new THREE.Mesh(
-                    new THREE.BoxGeometry(0.2, 0.1, 0.04), 
-                    new THREE.MeshStandardMaterial({color: 0xe94560})
-                );
-                btn.position.set(0, 1.5, -0.58);
-                menuGroup.add(btn);
-                
-                playerRig.add(menuGroup); // Привязываем к игроку
-                isMenuOpen = true;
-            }
-        }
-
-        function spawnBlock(controller) {
-            const size = 0.2; // Размер кубика
-            
-            // Случайный цвет для кубика
-            const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff];
-            const randomColor = colors[Math.floor(Math.random() * colors.length)];
-            
-            // Графический объект
-            const blockGeo = new THREE.BoxGeometry(size, size, size);
-            const blockMat = new THREE.MeshStandardMaterial({ color: randomColor });
-            const block = new THREE.Mesh(blockGeo, blockMat);
-            block.castShadow = true;
-            block.receiveShadow = true;
-            
-            // Позиция спавна - немного впереди контроллера
-            const spawnPos = new THREE.Vector3(0, 0, -0.2).applyMatrix4(controller.matrixWorld);
-            scene.add(block);
-            
-            // Физический объект
-            const body = new CANNON.Body({mass: 2}); // Масса 2 кг
-            body.addShape(new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2)));
-            body.position.set(spawnPos.x, spawnPos.y, spawnPos.z);
-            
-            // Придаем небольшой импульс вперед
-            const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.quaternion);
-            body.velocity.set(direction.x * 2, direction.y * 2, direction.z * 2);
-            
+            const body = new CANNON.Body({ mass: 1, shape: new CANNON.Box(new CANNON.Vec3(size/2, size/2, size/2)) });
+            body.position.copy(mesh.position);
             world.addBody(body);
-            
-            // Сохраняем связку графики и физики
-            blocks.push({mesh: block, body: body});
+
+            blocks.push({ mesh, body });
         }
 
-        function animate() {
-            // Шаг физического движка
+        function update() {
             world.step(1/60);
-            
-            const session = renderer.xr.getSession();
-            if (session) {
-                // Обработка ввода с контроллеров
-                session.inputSources.forEach((source, index) => {
-                    if (source.gamepad) {
-                        const axes = source.gamepad.axes;
-                        const buttons = source.gamepad.buttons;
-                        const controller = controllers[index];
-
-                        // Кнопка Y/B (обычно индекс 5 или 4) для открытия меню
-                        if (source.handedness === 'right' && buttons[4]?.pressed && !window.menuCooldown) {
-                            toggleMenu();
-                            window.menuCooldown = true;
-                            setTimeout(() => window.menuCooldown = false, 500);
-                        }
-                        
-                        // Триггер (индекс 0) для спавна блока
-                        if (buttons[0]?.pressed && !window[`triggerCooldown${index}`]) {
-                            spawnBlock(controller);
-                            window[`triggerCooldown${index}`] = true;
-                            setTimeout(() => window[`triggerCooldown${index}`] = false, 300); // Кулдаун 0.3 сек
-                        }
-
-                        // Плавное перемещение на левый стик
-                        if (source.handedness === 'left') {
-                            const moveSpeed = 0.05;
-                            
-                            // Получаем вектор направления взгляда игрока (камеры)
-                            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-                            forward.y = 0; // Запрещаем летать
-                            forward.normalize();
-                            
-                            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-                            right.y = 0;
-                            right.normalize();
-                            
-                            // axes[3] - вперед/назад, axes[2] - влево/вправо
-                            if (Math.abs(axes[3]) > 0.1) {
-                                playerRig.position.add(forward.multiplyScalar(-axes[3] * moveSpeed));
-                            }
-                            if (Math.abs(axes[2]) > 0.1) {
-                                playerRig.position.add(right.multiplyScalar(axes[2] * moveSpeed));
-                            }
-                        } 
-                        // Snap-turn (резкий поворот) на правый стик, чтобы не тошнило
-                        else if (source.handedness === 'right') {
-                            if (Math.abs(axes[2]) > 0.5 && !window.rotateCooldown) {
-                                // Поворот на 45 градусов (PI/4)
-                                playerRig.rotation.y -= Math.sign(axes[2]) * (Math.PI / 4);
-                                window.rotateCooldown = true;
-                                setTimeout(() => window.rotateCooldown = false, 500);
-                            }
-                        }
-                    }
-                });
-            }
 
             blocks.forEach(b => {
                 b.mesh.position.copy(b.body.position);
                 b.mesh.quaternion.copy(b.body.quaternion);
-                
-                // Ограничение: если блок упал слишком низко, удаляем его, чтобы не тормозило
-                if (b.body.position.y < -10) {
-                    scene.remove(b.mesh);
-                    world.remove(b.body);
-                }
             });
 
-            // Рендер кадра
             renderer.render(scene, camera);
         }
 
-        // Запуск
         init();
     </script>
 </body>
